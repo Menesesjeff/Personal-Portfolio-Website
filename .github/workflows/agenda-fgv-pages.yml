@@ -35,6 +35,9 @@ jobs:
           # Configure em Settings > Secrets and variables > Actions > Variables
           VITE_APPS_SCRIPT_URL: ${{ vars.VITE_APPS_SCRIPT_URL }}
           VITE_COORD_PASS: ${{ secrets.VITE_COORD_PASS }}
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: agenda-entrevistas-fgv/dist
