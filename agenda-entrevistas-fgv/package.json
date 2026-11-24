@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Agenda das Entrevistas Redistribuída — FGV DGPE (PWA)",
+  "description": "Agenda das Bancas — FGV DGPE (PWA)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

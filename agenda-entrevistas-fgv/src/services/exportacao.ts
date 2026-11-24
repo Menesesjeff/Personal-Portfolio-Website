@@ -138,7 +138,7 @@ export function montarWorkbook(XLSX: XLSXModule, reservas: Reserva[]): WorkBook 
   wsMatriz['!autofilter'] = { ref: `A1:K${SLOTS.length + 1}` };
   XLSX.utils.book_append_sheet(wb, wsMatriz, 'Matriz_Vagas');
 
-  wb.Props = { Title: 'Agenda das Entrevistas — FGV DGPE', Author: 'FGV DGPE' };
+  wb.Props = { Title: 'Agenda das Bancas — FGV DGPE', Author: 'FGV DGPE' };
   return wb;
 }
 

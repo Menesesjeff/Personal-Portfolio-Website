@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#ededed"/>
+  <g transform="translate(10.0 10.0) scale(0.9)">
+  <polygon points="19,61 45,61 65,91 41,91" fill="#023979"/>
+  <polygon points="60,61 88,61 70,79" fill="#023979"/>
+  <text x="95" y="91" font-family="Arial, Helvetica, 'Liberation Sans', sans-serif" font-weight="700" font-size="41.5" fill="#023979" textLength="90" lengthAdjust="spacingAndGlyphs">FGV</text>
+  <rect x="17" y="105.6" width="166" height="1.6" fill="#cbccd1"/>
+  <text x="100" y="140.5" text-anchor="middle" font-family="Arial, Helvetica, 'Liberation Sans', sans-serif" font-weight="700" font-size="22" fill="#0b8dcb" letter-spacing="0.6">DGPE</text>
+
+  </g>
+</svg>

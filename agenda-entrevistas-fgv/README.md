@@ -1,4 +1,6 @@
-# Agenda das Entrevistas Redistribuída — FGV DGPE
+# Agenda das Bancas — FGV DGPE
+
+*Agenda das Entrevistas Redistribuída do processo seletivo unificado.*
 
 Aplicativo web **instalável no celular (PWA)** para os avaliadores marcarem disponibilidade nas
 bancas de entrevistas do processo seletivo unificado. Funciona no navegador do computador e,

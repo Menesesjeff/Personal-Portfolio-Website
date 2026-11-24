@@ -165,7 +165,7 @@ export default function App() {
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-slate-500 sm:flex-row">
-          <p>© {new Date().getFullYear()} FGV DGPE · Agenda das Entrevistas Redistribuída</p>
+          <p>© {new Date().getFullYear()} FGV DGPE · Agenda das Bancas</p>
           <button
             type="button"
             onClick={() => (lerSessao(CHAVES.coordenacao) === '1' ? setPainelAberto(true) : setSenhaAberta(true))}

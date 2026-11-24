@@ -1,11 +1,11 @@
-/* Service Worker — Agenda das Entrevistas FGV DGPE
+/* Service Worker — Agenda das Bancas FGV DGPE
  * - App shell pré-cacheado (abre offline e é instalável)
  * - Navegação: network-first com fallback ao index.html em cache
  * - Assets do mesmo domínio: stale-while-revalidate
  * - Requisições ao Google Apps Script NÃO são interceptadas (sempre rede)
  */
-const VERSAO = 'agenda-fgv-v1';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
+const VERSAO = 'agenda-fgv-v2';
+const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/logo-header.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(VERSAO).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

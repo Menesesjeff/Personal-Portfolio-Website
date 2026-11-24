@@ -2,42 +2,9 @@ import type { StatusSync } from '../services/sincronizador';
 
 export function LogoFGV({ className = '' }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 210 56"
-      className={className}
-      role="img"
-      aria-label="FGV DGPE Educação"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect x="0" y="0" width="74" height="56" rx="6" fill="#ffffff" />
-      <text
-        x="37"
-        y="38"
-        textAnchor="middle"
-        fontFamily="Georgia, 'Times New Roman', serif"
-        fontWeight="700"
-        fontSize="30"
-        fill="#002b5c"
-        letterSpacing="1"
-      >
-        FGV
-      </text>
-      <rect x="84" y="8" width="2" height="40" fill="#facc15" />
-      <text x="96" y="27" fontFamily="Inter, Arial, sans-serif" fontWeight="800" fontSize="21" fill="#ffffff">
-        DGPE
-      </text>
-      <text
-        x="96"
-        y="46"
-        fontFamily="Inter, Arial, sans-serif"
-        fontWeight="500"
-        fontSize="14"
-        fill="#bfdbfe"
-        letterSpacing="2"
-      >
-        EDUCAÇÃO
-      </text>
-    </svg>
+    <span className={`inline-flex items-center rounded-lg bg-[#ededed] px-2 py-1 shadow-sm ${className}`}>
+      <img src="icons/logo-header.png" alt="FGV DGPE" width={176} height={94} className="h-full w-auto" />
+    </span>
   );
 }
 
@@ -109,12 +76,12 @@ export function Cabecalho(props: {
       </div>
       <div className="bg-fgv-marinho text-white shadow-md">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-5 gap-y-3 px-4 py-4">
-          <LogoFGV className="h-10 w-auto shrink-0 sm:h-12" />
+          <LogoFGV className="h-12 shrink-0 sm:h-14" />
           <div className="order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-sky-300">
-              Processo Seletivo Unificado<span className="hidden sm:inline"> · Bancas de Entrevistas</span>
+              Entrevistas Redistribuídas<span className="hidden sm:inline"> · Processo Seletivo Unificado</span>
             </p>
-            <h1 className="text-xl font-bold leading-tight sm:text-2xl">Agenda das Entrevistas Redistribuída</h1>
+            <h1 className="text-xl font-bold leading-tight sm:text-2xl">Agenda das Bancas</h1>
           </div>
           <div className="ml-auto sm:ml-0">
             <BadgeSync {...props} />

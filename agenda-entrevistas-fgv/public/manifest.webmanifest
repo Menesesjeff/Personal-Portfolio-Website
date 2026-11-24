@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Agenda das Entrevistas — FGV DGPE",
-  "short_name": "Agenda FGV",
+  "name": "Agenda das Bancas — FGV DGPE",
+  "short_name": "Agenda das Bancas",
   "description": "Agendamento de disponibilidade de avaliadores nas bancas de entrevistas do processo seletivo unificado — FGV DGPE.",
   "lang": "pt-BR",
   "dir": "ltr",
@@ -10,7 +10,7 @@
   "display": "standalone",
   "orientation": "any",
   "theme_color": "#002b5c",
-  "background_color": "#f1f5f9",
+  "background_color": "#ededed",
   "categories": ["education", "productivity"],
   "icons": [
     { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },

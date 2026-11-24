@@ -3,4 +3,4 @@ Built a modern, responsive resume-style webpage using HTML and CSS. Leveraged AI
 
 ## Projetos
 
-- [`agenda-entrevistas-fgv/`](agenda-entrevistas-fgv/): **Agenda das Entrevistas Redistribuída — FGV DGPE**, PWA em React + TypeScript para agendar avaliadores nas bancas de entrevistas, integrado ao Google Sheets.
+- [`agenda-entrevistas-fgv/`](agenda-entrevistas-fgv/): **Agenda das Bancas — FGV DGPE**, PWA em React + TypeScript para agendar avaliadores nas bancas de entrevistas, integrado ao Google Sheets.

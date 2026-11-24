@@ -1,5 +1,5 @@
 /**
- * Agenda das Entrevistas Redistribuída — FGV DGPE
+ * Agenda das Bancas — FGV DGPE
  * Backend Google Apps Script (Web App) para a planilha Google Sheets.
  *
  * COMO USAR
