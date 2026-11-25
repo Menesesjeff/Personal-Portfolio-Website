@@ -192,7 +192,7 @@ function lerReservas_() {
     var v = valores[i];
     if (!v[2] || !v[10]) continue;
     var ts = v[1] instanceof Date ? v[1].toISOString() : String(v[1]);
-    lista.push({ id: String(v[0]), timestamp: ts, slotId: String(v[2]), nome: String(v[9]), email: String(v[10]).toLowerCase() });
+    lista.push({ id: String(v[0]), timestamp: ts, slotId: String(v[2]), nome: String(v[9]), email: String(v[10]).trim().toLowerCase() });
   }
   return lista;
 }

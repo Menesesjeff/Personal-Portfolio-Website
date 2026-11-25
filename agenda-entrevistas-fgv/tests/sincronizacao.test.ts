@@ -214,3 +214,47 @@ describe('Sincronizador — avaliações', () => {
     expect((await sync.carregarResultados('qualquer')).avaliacoes).toHaveLength(1);
   });
 });
+
+describe('Sincronizador — e-mail do avaliador definido durante a sincronização', () => {
+  function servidorLento() {
+    const pedidos: string[] = [];
+    let liberar: (() => void) | null = null;
+    const fetcher = vi.fn(async (url: string) => {
+      pedidos.push(url);
+      const email = new URL(url).searchParams.get('email') ?? '';
+      if (pedidos.length === 1) await new Promise<void>((r) => (liberar = r)); // 1ª resposta demora
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          reservas: [{ id: 'R1', timestamp: '2026-11-20T12:00:00Z', slotId: 'SLOT-001', nome: 'Bruno', email: 'bruno@fgv.br' }],
+          candidatos: email ? { 'AL G1': [{ nome: 'C1', email: 'c1@x.com' }] } : {},
+          links: {},
+          avaliacoes: [],
+        }),
+      );
+    });
+    return { fetcher, pedidos, liberar: () => liberar?.() };
+  }
+
+  it('o 2º avaliador recebe os candidatos mesmo que o app tenha começado a sincronizar antes de saber o e-mail', async () => {
+    const srv = servidorLento();
+    const sync = new Sincronizador(criarArmazenamentoMemoria(), URL_EXEC, (u) => new ClienteAppsScript(u, srv.fetcher as unknown as typeof fetch));
+    const primeira = sync.sincronizar(); // abre o app: ainda sem e-mail
+    sync.definirAvaliador('bruno@fgv.br'); // o e-mail chega logo depois
+    srv.liberar();
+    await primeira;
+    await vi.waitFor(() => expect(sync.atual.dados.candidatos['AL G1']).toHaveLength(1));
+    expect(srv.pedidos).toHaveLength(2);
+    expect(srv.pedidos[1]).toContain('email=bruno%40fgv.br');
+  });
+
+  it('ao trocar de e-mail, os candidatos do avaliador anterior somem da tela', async () => {
+    const srv = servidorLento();
+    const sync = new Sincronizador(criarArmazenamentoMemoria(), URL_EXEC, (u) => new ClienteAppsScript(u, srv.fetcher as unknown as typeof fetch));
+    sync.definirAvaliador('ana@fgv.br');
+    srv.liberar();
+    await vi.waitFor(() => expect(sync.atual.dados.candidatos['AL G1']).toHaveLength(1));
+    sync.definirAvaliador('outra@fgv.br');
+    expect(sync.atual.dados.candidatos).toEqual({});
+  });
+});

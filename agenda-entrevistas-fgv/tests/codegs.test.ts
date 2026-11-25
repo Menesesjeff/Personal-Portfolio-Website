@@ -187,3 +187,18 @@ describe('scripts/Code.gs — avaliações', () => {
     expect(r.rejeitadas).toEqual([{ slotId: 'SLOT-001', motivo: 'lotada' }]);
   });
 });
+
+describe('scripts/Code.gs — e-mail da reserva com espaços', () => {
+  it('o avaliador recebe os candidatos mesmo se a reserva foi editada à mão com espaço/maiúscula', () => {
+    const gs = carregarCodeGs({ ADMIN_TOKEN: 'segredo' });
+    (gs.sandbox.configurar as () => void)();
+    gs.abas.Candidatos.linhas.push(['AL G1', 'Cand Um', 'cand1@x.com']);
+    gs.post({ action: 'reserve', nome: 'Ana Lima', email: 'ana@fgv.br', slotIds: ['SLOT-001'] });
+    gs.abas.Reservas.linhas.push(['R-manual', new Date(), 'SLOT-001', '07/12', 'segunda', '09h00-10h00', 'A', 'AL', 'G1', 'Bruno Reis', ' Bruno@FGV.br ']);
+    const bruno = gs.get({ action: 'list', email: 'bruno@fgv.br' });
+    expect(bruno.candidatos['AL G1']).toHaveLength(1);
+    const ana = gs.get({ action: 'list', email: 'ana@fgv.br' });
+    expect(ana.candidatos['AL G1']).toHaveLength(1);
+    expect(gs.post({ action: 'salvarAvaliacao', avaliacao: { ...ficha(), avaliadorEmail: 'bruno@fgv.br' } }).ok).toBe(true);
+  });
+});

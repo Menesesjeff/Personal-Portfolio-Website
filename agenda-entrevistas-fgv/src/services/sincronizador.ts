@@ -58,6 +58,8 @@ export class Sincronizador {
   private estado: EstadoSync;
   private ouvintes = new Set<Ouvinte>();
   private emAndamento: Promise<void> | null = null;
+  /** Pedido de nova sincronização feito enquanto outra estava em andamento. */
+  private ressincronizar = false;
   private emailAvaliador = '';
 
   constructor(
@@ -115,7 +117,12 @@ export class Sincronizador {
     const e = emailValido(email) ? normalizarEmail(email) : '';
     if (e === this.emailAvaliador) return;
     this.emailAvaliador = e;
-    if (this.estado.endpoint) void this.sincronizar();
+    if (!this.estado.endpoint) return;
+    // Candidatos de outro avaliador (ex.: celular compartilhado) não ficam na tela.
+    this.definirDados(DADOS_VAZIOS);
+    // Se uma sincronização (ainda sem este e-mail) estiver em andamento, roda outra ao terminar.
+    if (this.emAndamento) this.ressincronizar = true;
+    else void this.sincronizar();
   }
 
   private definirDados(dados: DadosBancas, avaliacaoDisponivel = this.estado.avaliacaoDisponivel): void {
@@ -134,6 +141,10 @@ export class Sincronizador {
     if (this.emAndamento) return this.emAndamento;
     this.emAndamento = this.executarSync().finally(() => {
       this.emAndamento = null;
+      if (this.ressincronizar) {
+        this.ressincronizar = false;
+        void this.sincronizar();
+      }
     });
     return this.emAndamento;
   }
@@ -152,15 +163,19 @@ export class Sincronizador {
         this.fila.shift();
         this.persistir();
       }
-      const r = await cliente.listarCompleto(this.emailAvaliador);
+      const emailConsultado = this.emailAvaliador;
+      const r = await cliente.listarCompleto(emailConsultado);
       this.confirmadas = r.reservas;
       this.persistir();
-      this.armazenamento.gravar(CHAVES.dadosBancas, r.dados);
+      // Se o e-mail mudou durante a consulta, a resposta é de outro avaliador: descarta os dados dela.
+      const dadosAtuais = emailConsultado === this.emailAvaliador;
+      if (dadosAtuais) this.armazenamento.gravar(CHAVES.dadosBancas, r.dados);
+      else this.ressincronizar = true;
       this.recalcular({
         status: 'online',
         ultimaSync: new Date().toISOString(),
         mensagem: null,
-        dados: r.dados,
+        dados: dadosAtuais ? r.dados : this.estado.dados,
         avaliacaoDisponivel: r.suportado,
       });
     } catch (e) {
