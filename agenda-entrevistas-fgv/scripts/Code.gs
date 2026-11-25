@@ -19,11 +19,34 @@
  *
  * As escritas rodam sob LockService (bloqueio do script), então duas pessoas
  * clicando ao mesmo tempo nunca ultrapassam a capacidade de 2 por banca.
+ *
+ * INTEGRAÇÃO COM O MICROSOFT TEAMS (via Power Automate)
+ *   - Aba "Candidatos": a coordenação preenche Grupo (ex.: "AL G1") | Nome | Email.
+ *   - Aba "Agenda_Teams": gerada automaticamente, 1 linha por banca, com início/fim
+ *     (horário de Brasília) e os e-mails de avaliadores + candidatos.
+ *     ProntaParaCriar = "Sim" quando a banca tem 2 avaliadores e candidatos cadastrados.
+ *   - Aba "Teams_Links": o Power Automate insere SlotID + link da reunião criada;
+ *     a coluna LinkTeams da Agenda_Teams é preenchida por fórmula a partir dela.
+ *
+ * E-MAILS: cada confirmação envia um e-mail ao avaliador com os horários reservados.
+ *   Para desligar, crie a propriedade do script ENVIAR_EMAILS = nao.
  */
 
 var NOME_ABA = 'Reservas';
 var CAPACIDADE = 2;
 var CABECALHO = ['ID', 'Timestamp', 'SlotID', 'Dia', 'DiaSemana', 'Horario', 'Banca', 'Estado', 'Grupo', 'Nome', 'Email'];
+var ANO = 2026; // ano das datas da grade (07/12 a 11/12)
+
+var ABA_CANDIDATOS = 'Candidatos';
+var CAB_CANDIDATOS = ['Grupo', 'Nome', 'Email'];
+var ABA_LINKS = 'Teams_Links';
+var CAB_LINKS = ['SlotID', 'LinkTeams', 'CriadoEm'];
+var ABA_AGENDA = 'Agenda_Teams';
+var CAB_AGENDA = [
+  'SlotID', 'Titulo', 'Inicio', 'Fim', 'Dia', 'DiaSemana', 'Horario', 'Banca', 'Grupo',
+  'AvaliadoresNomes', 'AvaliadoresEmails', 'CandidatosNomes', 'CandidatosEmails',
+  'Participantes', 'ProntaParaCriar', 'LinkTeams'
+];
 
 // ----------------------------------------------------------------------------
 // Grade (idêntica a src/data/grade.ts) — SLOT-001 .. SLOT-100
@@ -204,6 +227,8 @@ function reservar_(corpo) {
     var inicio = sh.getLastRow() + 1;
     sh.getRange(inicio, 1, linhas.length, CABECALHO.length).setValues(linhas);
     sh.getRange(inicio, 2, linhas.length, 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+    tentar_(function () { atualizarAgendaTeams_(reservas.concat(aceitas)); });
+    tentar_(function () { enviarConfirmacao_(nome, email, aceitas); });
   }
   return { ok: true, aceitas: aceitas, rejeitadas: rejeitadas, reservas: reservas.concat(aceitas) };
 }
@@ -220,11 +245,170 @@ function remover_(corpo) {
       if (String(ids[i][0]) === id) sh.deleteRow(i + 2);
     }
   }
-  return { ok: true, reservas: lerReservas_() };
+  var atuais = lerReservas_();
+  tentar_(function () { atualizarAgendaTeams_(atuais); });
+  return { ok: true, reservas: atuais };
 }
 
-/** Rode manualmente uma vez (menu Executar) para criar a aba e autorizar o script. */
+/** Falhas em tarefas auxiliares (agenda, e-mail) nunca impedem a reserva. */
+function tentar_(fn) {
+  try {
+    fn();
+  } catch (err) {
+    Logger.log('Aviso: ' + (err && err.message ? err.message : err));
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Agenda para o Microsoft Teams
+// ----------------------------------------------------------------------------
+function abaComCabecalho_(nome, cabecalho) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(nome) || ss.insertSheet(nome);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(cabecalho);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, cabecalho.length).setFontWeight('bold').setBackground('#002b5c').setFontColor('#ffffff');
+  }
+  return sh;
+}
+
+function normalizarGrupo_(g) {
+  return String(g || '').toUpperCase().replace(/\s+/g, ' ').trim();
+}
+
+function rotuloSlot_(s) {
+  return s.estado === 'Livre' ? 'Livre' : s.estado + ' ' + s.grupo;
+}
+
+/** "09h00-10h00" em 07/12 -> { inicio: "2026-12-07T09:00:00", fim: "2026-12-07T10:00:00" } */
+function inicioFim_(s) {
+  var d = s.dia.data.split('/');
+  var h = s.faixa.label.match(/(\d{2})h(\d{2})-(\d{2})h(\d{2})/);
+  var data = ANO + '-' + d[1] + '-' + d[0];
+  return { inicio: data + 'T' + h[1] + ':' + h[2] + ':00', fim: data + 'T' + h[3] + ':' + h[4] + ':00' };
+}
+
+/** Mapa "AL G1" -> [{ nome, email }] a partir da aba Candidatos. */
+function lerCandidatos_() {
+  var sh = abaComCabecalho_(ABA_CANDIDATOS, CAB_CANDIDATOS);
+  var n = sh.getLastRow() - 1;
+  var mapa = {};
+  if (n <= 0) return mapa;
+  var valores = sh.getRange(2, 1, n, 3).getValues();
+  for (var i = 0; i < valores.length; i++) {
+    var grupo = normalizarGrupo_(valores[i][0]);
+    var email = String(valores[i][2] || '').trim().toLowerCase();
+    if (!grupo || !email) continue;
+    (mapa[grupo] = mapa[grupo] || []).push({ nome: String(valores[i][1] || '').trim(), email: email });
+  }
+  return mapa;
+}
+
+/** Monta as linhas da aba Agenda_Teams (sem a coluna de fórmula LinkTeams). */
+function montarAgenda_(reservas, candidatos) {
+  var porSlot = {};
+  for (var i = 0; i < reservas.length; i++) {
+    (porSlot[reservas[i].slotId] = porSlot[reservas[i].slotId] || []).push(reservas[i]);
+  }
+  var linhas = [];
+  var ids = Object.keys(SLOTS).sort();
+  for (var j = 0; j < ids.length; j++) {
+    var s = SLOTS[ids[j]];
+    var rotulo = rotuloSlot_(s);
+    var t = inicioFim_(s);
+    var aval = porSlot[s.id] || [];
+    var cand = s.estado === 'Livre' ? [] : candidatos[normalizarGrupo_(rotulo)] || [];
+    var emails = aval.map(function (r) { return r.email; }).concat(cand.map(function (c) { return c.email; }));
+    linhas.push([
+      s.id,
+      'Banca ' + s.banca + ' — ' + rotulo + ' — ' + s.dia.data + ' ' + s.faixa.label.split('-')[0],
+      t.inicio,
+      t.fim,
+      s.dia.data,
+      s.dia.semana,
+      s.faixa.label,
+      s.banca,
+      rotulo,
+      aval.map(function (r) { return r.nome; }).join('; '),
+      aval.map(function (r) { return r.email; }).join(';'),
+      cand.map(function (c) { return c.nome; }).join('; '),
+      cand.map(function (c) { return c.email; }).join(';'),
+      emails.join(';'),
+      aval.length >= CAPACIDADE && cand.length > 0 ? 'Sim' : 'Não'
+    ]);
+  }
+  return linhas;
+}
+
+/** Recria a aba Agenda_Teams. Roda a cada reserva/remoção e ao editar Candidatos. */
+function atualizarAgendaTeams_(reservas) {
+  abaComCabecalho_(ABA_LINKS, CAB_LINKS);
+  var linhas = montarAgenda_(reservas || lerReservas_(), lerCandidatos_());
+  var sh = abaComCabecalho_(ABA_AGENDA, CAB_AGENDA);
+  var ultima = sh.getLastRow();
+  if (ultima > 1) sh.getRange(2, 1, ultima - 1, CAB_AGENDA.length).clearContent();
+  sh.getRange(2, 1, linhas.length, linhas[0].length).setValues(linhas);
+  var formulas = [];
+  for (var i = 0; i < linhas.length; i++) {
+    formulas.push(['=IFERROR(VLOOKUP($A' + (i + 2) + ',' + ABA_LINKS + '!$A:$B,2,FALSE),"")']);
+  }
+  sh.getRange(2, CAB_AGENDA.length, linhas.length, 1).setFormulas(formulas);
+}
+
+/** Menu e item para atualizar a agenda manualmente. */
+function atualizarAgendaTeams() {
+  atualizarAgendaTeams_();
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Agenda das Bancas')
+    .addItem('Atualizar Agenda_Teams', 'atualizarAgendaTeams')
+    .addToUi();
+}
+
+/** Ao editar Candidatos ou Reservas à mão, a Agenda_Teams é recalculada. */
+function onEdit(e) {
+  var nome = e && e.range ? e.range.getSheet().getName() : '';
+  if (nome === ABA_CANDIDATOS || nome === NOME_ABA) tentar_(function () { atualizarAgendaTeams_(); });
+}
+
+// ----------------------------------------------------------------------------
+// E-mail de confirmação ao avaliador
+// ----------------------------------------------------------------------------
+function montarEmailConfirmacao_(nome, aceitas) {
+  var itens = aceitas
+    .map(function (a) { return SLOTS[a.slotId]; })
+    .sort(function (x, y) { return x.id < y.id ? -1 : 1; })
+    .map(function (s) {
+      return '• ' + s.dia.data + ' (' + s.dia.semana + ') · ' + s.faixa.label + ' · Banca ' + s.banca + ' · ' + rotuloSlot_(s);
+    });
+  return {
+    subject: 'Agenda das Bancas — ' + aceitas.length + ' horário(s) confirmado(s)',
+    body:
+      'Olá, ' + nome + '!\n\n' +
+      'Registramos sua disponibilidade para as seguintes bancas de entrevistas:\n\n' +
+      itens.join('\n') +
+      '\n\nO convite do Microsoft Teams de cada banca será enviado pela coordenação ' +
+      'quando a banca estiver completa.\n\n' +
+      'Para cancelar algum horário, responda a este e-mail ou fale com a coordenação.\n\n' +
+      'FGV DGPE — Agenda das Bancas'
+  };
+}
+
+function enviarConfirmacao_(nome, email, aceitas) {
+  if (!aceitas.length) return;
+  if (PropertiesService.getScriptProperties().getProperty('ENVIAR_EMAILS') === 'nao') return;
+  if (MailApp.getRemainingDailyQuota() < 1) return;
+  var msg = montarEmailConfirmacao_(nome, aceitas);
+  MailApp.sendEmail({ to: email, subject: msg.subject, body: msg.body, name: 'Agenda das Bancas — FGV DGPE' });
+}
+
+/** Rode manualmente uma vez (menu Executar) para criar as abas e autorizar o script. */
 function configurar() {
   aba_();
-  Logger.log('Aba "%s" pronta. %s slots configurados.', NOME_ABA, Object.keys(SLOTS).length);
+  abaComCabecalho_(ABA_CANDIDATOS, CAB_CANDIDATOS);
+  atualizarAgendaTeams_();
+  Logger.log('Abas prontas. %s slots. Cota de e-mails hoje: %s', Object.keys(SLOTS).length, MailApp.getRemainingDailyQuota());
 }
