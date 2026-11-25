@@ -446,7 +446,11 @@ export function MinhasBancas({
   avaliacaoDisponivel,
   aoSalvar,
   aoIrParaGrade,
+  aoAtualizar,
+  atualizando = false,
 }: {
+  aoAtualizar?: () => void;
+  atualizando?: boolean;
   participante: Participante;
   identificacaoValida: boolean;
   reservas: Reserva[];
@@ -471,6 +475,19 @@ export function MinhasBancas({
 
   return (
     <section className="space-y-4" aria-label="Minhas Bancas">
+      {aoAtualizar && (
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+          <span>Os candidatos aparecem assim que a coordenação preencher a planilha.</span>
+          <button
+            type="button"
+            onClick={aoAtualizar}
+            disabled={atualizando}
+            className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {atualizando ? 'Atualizando…' : '↻ Atualizar'}
+          </button>
+        </div>
+      )}
       {!avaliacaoDisponivel && (
         <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
           A planilha ainda usa a versão anterior do script e não envia os candidatos. Avise a coordenação para atualizar o

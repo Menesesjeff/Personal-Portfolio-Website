@@ -167,7 +167,11 @@ export default function App() {
                 key={id}
                 type="button"
                 aria-current={abaPrincipal === id ? 'page' : undefined}
-                onClick={() => setAbaPrincipal(id)}
+                onClick={() => {
+                  setAbaPrincipal(id);
+                  // Ao abrir "Minhas Bancas", busca na hora os candidatos e avaliações mais recentes.
+                  if (id === 'minhas') void sync.sincronizar();
+                }}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
                   abaPrincipal === id ? 'bg-fgv-marinho text-white shadow' : 'text-slate-600 hover:bg-slate-100'
                 }`}
@@ -194,6 +198,8 @@ export default function App() {
               dados={agenda.dados}
               avaliacaoDisponivel={agenda.avaliacaoDisponivel}
               aoSalvar={(av) => sync.salvarAvaliacao(av)}
+              aoAtualizar={() => void sync.sincronizar()}
+              atualizando={agenda.status === 'sincronizando'}
               aoIrParaGrade={() => {
                 setAbaPrincipal('grade');
                 setMostrarErros(true);
