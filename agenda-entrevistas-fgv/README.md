@@ -25,7 +25,7 @@ npm test           # testes automatizados (regras de negócio, exportação, sin
 npm run build      # gera a pasta dist/ pronta para publicar
 ```
 
-Sem configurar nada, o app abre em **"Modo local"**: as reservas ficam salvas só no navegador
+A planilha da coordenação já vem configurada em `src/config.ts` (`APPS_SCRIPT_URL_PADRAO`). Se essa constante e `VITE_APPS_SCRIPT_URL` estiverem vazias, o app abre em **"Modo local"**: as reservas ficam salvas só no navegador
 daquele aparelho. Isso é útil para testar. Para que todos vejam as mesmas vagas, conecte a planilha
 (seção 3).
 
@@ -35,7 +35,7 @@ Copie `.env.example` para `.env`:
 
 | Variável | Para que serve | Padrão |
 |---|---|---|
-| `VITE_APPS_SCRIPT_URL` | URL do Web App do Apps Script (termina em `/exec`) | vazio (modo local) |
+| `VITE_APPS_SCRIPT_URL` | URL do Web App do Apps Script (termina em `/exec`) | a planilha de `src/config.ts` |
 | `VITE_COORD_PASS` | Senha da Área da Coordenação | `admin2026` |
 
 > ⚠️ A senha da coordenação fica embutida no código JavaScript publicado. Ela impede o acesso
