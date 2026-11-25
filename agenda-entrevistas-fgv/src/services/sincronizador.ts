@@ -1,4 +1,13 @@
-import { aplicarReservas, normalizarEmail, normalizarNome } from '../lib/regras';
+import {
+  aplicarAvaliacao,
+  candidatosDoGrupo,
+  DADOS_VAZIOS,
+  podeAvaliar,
+  type Avaliacao,
+  type DadosBancas,
+  type MapaCandidatos,
+} from '../lib/avaliacao';
+import { aplicarReservas, emailValido, normalizarEmail, normalizarNome } from '../lib/regras';
 import type { Participante, Rejeicao, Reserva } from '../lib/types';
 import { ClienteAppsScript, ErroRede } from './appsScript';
 import { CHAVES, type Armazenamento } from './armazenamento';
@@ -17,6 +26,10 @@ export interface EstadoSync {
   mensagem: string | null;
   endpoint: string;
   pendentes: number;
+  /** Candidatos, links do Teams e avaliações das bancas do avaliador identificado. */
+  dados: DadosBancas;
+  /** false quando a planilha ainda usa um Code.gs sem suporte a avaliações. */
+  avaliacaoDisponivel: boolean;
 }
 
 interface ItemFila {
@@ -45,6 +58,7 @@ export class Sincronizador {
   private estado: EstadoSync;
   private ouvintes = new Set<Ouvinte>();
   private emAndamento: Promise<void> | null = null;
+  private emailAvaliador = '';
 
   constructor(
     private readonly armazenamento: Armazenamento,
@@ -61,6 +75,8 @@ export class Sincronizador {
       mensagem: null,
       endpoint: endpoint.trim(),
       pendentes: 0,
+      dados: armazenamento.ler<DadosBancas>(CHAVES.dadosBancas, DADOS_VAZIOS),
+      avaliacaoDisponivel: true,
     };
     this.recalcular({});
   }
@@ -94,6 +110,19 @@ export class Sincronizador {
     return this.estado.endpoint ? this.criarCliente(this.estado.endpoint) : null;
   }
 
+  /** Informa o e-mail do avaliador para trazer os dados das bancas dele. */
+  definirAvaliador(email: string): void {
+    const e = emailValido(email) ? normalizarEmail(email) : '';
+    if (e === this.emailAvaliador) return;
+    this.emailAvaliador = e;
+    if (this.estado.endpoint) void this.sincronizar();
+  }
+
+  private definirDados(dados: DadosBancas, avaliacaoDisponivel = this.estado.avaliacaoDisponivel): void {
+    this.armazenamento.gravar(CHAVES.dadosBancas, dados);
+    this.recalcular({ dados, avaliacaoDisponivel });
+  }
+
   definirEndpoint(url: string): void {
     const limpo = url.trim();
     this.armazenamento.gravar(CHAVES.endpoint, limpo);
@@ -123,9 +152,17 @@ export class Sincronizador {
         this.fila.shift();
         this.persistir();
       }
-      this.confirmadas = await cliente.listar();
+      const r = await cliente.listarCompleto(this.emailAvaliador);
+      this.confirmadas = r.reservas;
       this.persistir();
-      this.recalcular({ status: 'online', ultimaSync: new Date().toISOString(), mensagem: null });
+      this.armazenamento.gravar(CHAVES.dadosBancas, r.dados);
+      this.recalcular({
+        status: 'online',
+        ultimaSync: new Date().toISOString(),
+        mensagem: null,
+        dados: r.dados,
+        avaliacaoDisponivel: r.suportado,
+      });
     } catch (e) {
       this.recalcular({
         status: e instanceof ErroRede ? 'offline' : 'erro',
@@ -201,5 +238,37 @@ export class Sincronizador {
       });
       throw e;
     }
+  }
+
+  /**
+   * Grava a avaliação de um candidato. Na planilha, o Apps Script revalida tudo e
+   * atualiza a linha existente (Grupo + EmailCandidato) em vez de duplicar.
+   */
+  async salvarAvaliacao(avaliacao: Avaliacao): Promise<{ editada: boolean }> {
+    const cliente = this.cliente();
+    if (!cliente) {
+      if (!podeAvaliar(avaliacao.slotId, avaliacao.grupo, avaliacao.avaliadorEmail, this.confirmadas)) {
+        throw new Error('Só os avaliadores desta banca podem avaliar este grupo.');
+      }
+      const existe = candidatosDoGrupo(avaliacao.grupo, this.estado.dados.candidatos).some(
+        (c) => c.email === avaliacao.emailCandidato,
+      );
+      if (!existe) throw new Error('Candidato não encontrado neste grupo.');
+      const r = aplicarAvaliacao(this.estado.dados.avaliacoes, avaliacao);
+      this.definirDados({ ...this.estado.dados, avaliacoes: r.lista });
+      return { editada: r.editada };
+    }
+    const r = await cliente.salvarAvaliacao(avaliacao);
+    let lista = r.avaliacoes;
+    if (lista.length === 0) lista = aplicarAvaliacao(this.estado.dados.avaliacoes, r.avaliacao ?? avaliacao).lista;
+    this.definirDados({ ...this.estado.dados, avaliacoes: lista });
+    return { editada: r.editada };
+  }
+
+  /** Todos os candidatos e avaliações (Resultados & Ranking da coordenação). */
+  async carregarResultados(token: string): Promise<{ candidatos: MapaCandidatos; avaliacoes: Avaliacao[] }> {
+    const cliente = this.cliente();
+    if (!cliente) return { candidatos: this.estado.dados.candidatos, avaliacoes: this.estado.dados.avaliacoes };
+    return cliente.resultados(token);
   }
 }

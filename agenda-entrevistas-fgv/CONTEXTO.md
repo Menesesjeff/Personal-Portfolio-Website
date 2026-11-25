@@ -45,16 +45,33 @@ React + TypeScript + Tailwind CSS 4 + Vite 6. Testes com Vitest (63 testes). Exc
 - Para atualizar o script, use *Implantar → Gerenciar implantações → Editar → Nova versão*, que mantém a URL. **"Nova implantação" muda a URL.**
 
 ## 6. Área da Coordenação (rodapé do app)
-- Senha: `admin2026` (`VITE_COORD_PASS`). Ainda não foi trocada.
-- Tem indicadores, download do Excel `Agenda_Entrevistas_FGV_DGPE.xlsx` (abas `Reservas` e `Matriz_Vagas`), CSV, filtros e remoção de reservas.
+- Senha forte combinada com a coordenação. O código guarda só o **hash SHA-256** (`src/lib/senha.ts`). `VITE_ADMIN_PASSWORD` substitui a senha no deploy.
+- A propriedade `ADMIN_TOKEN` do Apps Script deve ter **a mesma senha**: protege a remoção de reservas e libera "Resultados & Ranking".
+- Sub-aba **Reservas & Ocupação**: indicadores, mapa de ocupação, Excel `Agenda_Entrevistas_FGV_DGPE.xlsx` (abas `Reservas` e `Matriz_Vagas`), CSV, filtros e remoção.
+- Sub-aba **Resultados & Ranking**:
+  - indicadores de candidatos (avaliados, pendentes, presentes, ausentes, aptos, não-aptos);
+  - filtros por UF, grupo e status;
+  - ranking ordenado assim: aptos primeiro, depois pontos (decrescente), depois chave do vídeo (decrescente);
+  - export `Resultados_Ranking_FGV_DGPE.xlsx` (abas `Ranking_Consolidado` e `Avaliacoes_Detalhadas`).
 
-## 7. Pronto no código, mas não ativado
-Por enquanto a decisão é usar **só o app dos avaliadores**.
-- O `scripts/Code.gs` deste repositório traz:
-  - e-mail de confirmação ao avaliador;
-  - as abas `Candidatos` (Grupo | Nome | Email), `Agenda_Teams` e `Teams_Links`.
-- Também há um fluxo do Power Automate (Microsoft 365 institucional) que cria uma reunião do Teams por banca completa (2 avaliadores e 5 candidatos). O passo a passo está no README, seção 5.
-- A planilha publicada ainda usa o **script antigo**, que funciona normalmente com o app.
+## 7. Avaliação dos candidatos ("Minhas Bancas") e abas gerenciadas
+- Navegação no topo: **Grade de Bancas | Minhas Bancas**. Minhas Bancas substitui o Google Forms de avaliação.
+- O `scripts/Code.gs` cria e mantém estas abas:
+  - `Candidatos`: Grupo | Nome | Email;
+  - `Teams_Links`: SlotId | Grupo | LinkTeams;
+  - `Avaliacoes`: Timestamp … TotalPontos | Apto | Observacoes;
+  - `Agenda_Teams`.
+- **Antes** de a aba Candidatos ter o grupo, a banca mostra o aviso de "fechamento do lote". **Depois**, mostra os candidatos, o botão "Entrar na Sala Teams" e a ficha de avaliação.
+- **Ficha de avaliação:**
+  - presença;
+  - chave do vídeo (1–4);
+  - 5 critérios (0–3, total até 15);
+  - parecer;
+  - observações.
+- Ausente = 0 pontos e "Não, não-apto". Uma linha por `Grupo + EmailCandidato`: o 2º avaliador **edita** a linha, não duplica.
+- O GET `list&email=` só devolve candidatos e avaliações dos grupos das bancas desse e-mail. O POST `resultados` exige `ADMIN_TOKEN`.
+- Também há e-mail de confirmação e fluxo do Power Automate para reuniões do Teams (README, seção 5).
+- **Atenção:** a planilha só ganha esses recursos depois que o novo `Code.gs` for colado no Apps Script e publicado como **Nova versão**. Até lá, o app avisa em Minhas Bancas e as reservas continuam funcionando.
 
 ## 8. Candidatos
 - A inscrição é feita por **Google Forms** (nome, e-mail e estado). A coordenação distribui os candidatos nos grupos.

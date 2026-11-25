@@ -19,6 +19,7 @@ import { urlValida } from '../services/appsScript';
 import { baixarCsv, baixarXlsx, formatarTimestamp } from '../services/exportacao';
 import type { Sincronizador, StatusSync } from '../services/sincronizador';
 import { Modal } from './Modal';
+import { ResultadosRanking } from './ResultadosRanking';
 
 export function ModalSenha({
   aberto,
@@ -27,16 +28,17 @@ export function ModalSenha({
 }: {
   aberto: boolean;
   aoFechar: () => void;
-  aoDesbloquear: () => void;
+  aoDesbloquear: (senha: string) => void;
 }) {
   const [senha, setSenha] = useState('');
   const [erro, setErro] = useState(false);
   const enviar = (e: FormEvent) => {
     e.preventDefault();
-    if (senha === CONFIG.senhaCoordenacao) {
+    if (CONFIG.verificarSenha(senha)) {
+      const correta = senha;
       setSenha('');
       setErro(false);
-      aoDesbloquear();
+      aoDesbloquear(correta);
     } else setErro(true);
   };
   return (
@@ -197,7 +199,9 @@ export function PainelCoordenacao({
   mensagem,
   endpoint,
   sync,
+  token,
 }: {
+  token: string;
   aberto: boolean;
   aoFechar: () => void;
   reservas: Reserva[];
@@ -208,6 +212,7 @@ export function PainelCoordenacao({
   endpoint: string;
   sync: Sincronizador;
 }) {
+  const [aba, setAba] = useState<'reservas' | 'resultados'>('reservas');
   const [filtros, setFiltros] = useState<FiltrosReserva>({ dia: '', estado: '', busca: '', faixa: '' });
   const [url, setUrl] = useState(endpoint);
   const [aviso, setAviso] = useState<string | null>(null);
@@ -236,7 +241,7 @@ export function PainelCoordenacao({
   const remover = async (r: Reserva) => {
     if (!window.confirm(`Remover a reserva de ${r.nome} em ${r.slotId}?`)) return;
     try {
-      await sync.remover(r.id, CONFIG.senhaCoordenacao);
+      await sync.remover(r.id, token);
     } catch (e) {
       window.alert(`Não foi possível remover: ${e instanceof Error ? e.message : e}`);
     }
@@ -262,6 +267,31 @@ export function PainelCoordenacao({
   return (
     <Modal aberto={aberto} aoFechar={aoFechar} titulo="Área da Coordenação" largura="max-w-6xl" telaCheiaMobile>
       <div className="space-y-5">
+        <nav className="flex gap-1 rounded-xl bg-slate-100 p-1 text-sm font-semibold" aria-label="Seções da coordenação">
+          {(
+            [
+              ['reservas', 'Reservas & Ocupação'],
+              ['resultados', 'Resultados & Ranking'],
+            ] as const
+          ).map(([id, rotulo]) => (
+            <button
+              key={id}
+              type="button"
+              aria-current={aba === id ? 'page' : undefined}
+              onClick={() => setAba(id)}
+              className={`flex-1 rounded-lg px-3 py-2 transition ${
+                aba === id ? 'bg-white text-fgv-marinho shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {rotulo}
+            </button>
+          ))}
+        </nav>
+
+        {aba === 'resultados' ? (
+          <ResultadosRanking sync={sync} token={token} />
+        ) : (
+        <>
         {/* Ações principais */}
         <div className="flex flex-col gap-2 rounded-xl bg-gradient-to-r from-fgv-marinho to-fgv-azul p-3 text-white sm:flex-row sm:items-center">
           <p className="flex-1 text-sm">
@@ -525,6 +555,8 @@ export function PainelCoordenacao({
           </form>
           {aviso && <p className="mt-2 text-xs text-sky-800">{aviso}</p>}
         </details>
+        </>
+        )}
       </div>
     </Modal>
   );

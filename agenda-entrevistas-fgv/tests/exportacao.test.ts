@@ -76,3 +76,25 @@ describe('exportação', () => {
     expect(XLSX.utils.sheet_to_json(wb.Sheets.Matriz_Vagas)).toHaveLength(100);
   });
 });
+
+describe('exportação de Resultados & Ranking', () => {
+  it('gera as abas Ranking_Consolidado e Avaliacoes_Detalhadas', async () => {
+    const { montarRanking, montarAvaliacao, APTO } = await import('../src/lib/avaliacao');
+    const { montarWorkbookResultados, NOME_ARQUIVO_RESULTADOS } = await import('../src/services/exportacao');
+    const av = montarAvaliacao(
+      { slotId: 'SLOT-001', grupo: 'AL G1', candidato: { nome: 'C1', email: 'c1@x.com' }, avaliadorEmail: 'a@x.com', avaliadorNome: 'Ana' },
+      { presente: 'Sim, presente', chaveVideo: 4, criterios: [3, 3, 2, 2, 1], apto: APTO, observacoes: 'ok' },
+    );
+    const ranking = montarRanking({ 'AL G1': [{ nome: 'C1', email: 'c1@x.com' }, { nome: 'C2', email: 'c2@x.com' }] }, [av]);
+    const wb = montarWorkbookResultados(XLSX, ranking, [av]);
+    expect(NOME_ARQUIVO_RESULTADOS).toBe('Resultados_Ranking_FGV_DGPE.xlsx');
+    expect(wb.SheetNames).toEqual(['Ranking_Consolidado', 'Avaliacoes_Detalhadas']);
+    const rank = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets.Ranking_Consolidado);
+    expect(rank.map((l) => [l.Posicao, l.Candidato, l.Status, l.TotalPontos])).toEqual([
+      [1, 'C1', 'Avaliado • Apto (11/15)', 11],
+      [2, 'C2', 'Pendente', ''],
+    ]);
+    const det = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets.Avaliacoes_Detalhadas);
+    expect(det[0]).toMatchObject({ Grupo: 'AL G1', Crit1_AnalisePedagogica: 3, Crit5_PosturaColaboracao: 1, TotalPontos: 11, Apto: 'Sim, apto' });
+  });
+});

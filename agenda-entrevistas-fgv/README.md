@@ -36,11 +36,13 @@ Copie `.env.example` para `.env`:
 | Variável | Para que serve | Padrão |
 |---|---|---|
 | `VITE_APPS_SCRIPT_URL` | URL do Web App do Apps Script (termina em `/exec`) | a planilha de `src/config.ts` |
-| `VITE_COORD_PASS` | Senha da Área da Coordenação | `admin2026` |
+| `VITE_ADMIN_PASSWORD` | Senha da Área da Coordenação (`VITE_COORD_PASS` ainda é aceita) | senha forte padrão, combinada com a coordenação |
 
-> ⚠️ A senha da coordenação fica embutida no código JavaScript publicado. Ela impede o acesso
-> casual, mas não substitui uma autenticação real. Para proteger a **remoção** de reservas na
-> planilha, configure também a propriedade `ADMIN_TOKEN` no Apps Script (seção 3, passo 3).
+> 🔐 **Senha da coordenação.** Sem `VITE_ADMIN_PASSWORD`, vale a senha padrão. O código guarda
+> **apenas o hash SHA-256** dela (`src/lib/senha.ts`), então a senha não aparece no repositório
+> nem no JavaScript publicado. Para trocar, defina `VITE_ADMIN_PASSWORD` no deploy (ou gere um novo
+> hash). Use **a mesma senha** na propriedade `ADMIN_TOKEN` do Apps Script (seção 3, passo 3):
+> ela protege a remoção de reservas e libera a aba **Resultados & Ranking**.
 
 ---
 
@@ -53,7 +55,7 @@ O PWA precisa de **HTTPS**, que as três opções abaixo já oferecem. O app est
 1. Acesse <https://vercel.com/new> e entre com o GitHub.
 2. Importe este repositório.
 3. Em **Root Directory**, escolha `agenda-entrevistas-fgv`. O framework Vite é detectado sozinho.
-4. (Opcional) Em **Environment Variables**, adicione `VITE_APPS_SCRIPT_URL` e `VITE_COORD_PASS`.
+4. (Opcional) Em **Environment Variables**, adicione `VITE_APPS_SCRIPT_URL` e `VITE_ADMIN_PASSWORD`.
 5. Clique em **Deploy**. Você recebe um link `https://<nome>.vercel.app`.
 
 ### Opção B — Netlify (≈ 2 min)
@@ -70,7 +72,7 @@ O PWA precisa de **HTTPS**, que as três opções abaixo já oferecem. O app est
 O workflow `.github/workflows/agenda-fgv-pages.yml` já está pronto: ele testa, compila e publica.
 1. No GitHub: **Settings → Pages → Source = GitHub Actions**.
 2. (Opcional) Em **Settings → Secrets and variables → Actions**, crie a *variable*
-   `VITE_APPS_SCRIPT_URL` e o *secret* `VITE_COORD_PASS`.
+   `VITE_APPS_SCRIPT_URL` e o *secret* `VITE_ADMIN_PASSWORD`.
 3. Faça push para `main` (ou rode o workflow manualmente em **Actions**).
 4. O link fica `https://<usuario>.github.io/<repositorio>/`.
 
@@ -90,9 +92,9 @@ O build usa caminhos relativos (`base: './'`), então funciona tanto na raiz de 
    `ID, Timestamp, SlotID, Dia, DiaSemana, Horario, Banca, Estado, Grupo, Nome, Email`.
 2. Na planilha, abra **Extensões → Apps Script**, apague o conteúdo e cole todo o arquivo
    [`scripts/Code.gs`](scripts/Code.gs). Salve.
-3. *(Recomendado)* Em **Configurações do projeto (⚙) → Propriedades do script**, adicione
-   `ADMIN_TOKEN` com **o mesmo valor de `VITE_COORD_PASS`**. Sem isso, qualquer pessoa que
-   conheça a URL consegue remover reservas.
+3. Em **Configurações do projeto (⚙) → Propriedades do script**, adicione `ADMIN_TOKEN` com
+   **a mesma senha da Área da Coordenação**. Sem isso, qualquer pessoa que conheça a URL consegue
+   remover reservas, e a aba **Resultados & Ranking** fica bloqueada.
 4. Selecione a função `configurar` e clique em **Executar** uma vez, para criar a aba e autorizar o script.
 5. Clique em **Implantar → Nova implantação → Tipo: App da Web**:
    - *Executar como:* **Eu**
@@ -120,7 +122,7 @@ O build usa caminhos relativos (`base: './'`), então funciona tanto na raiz de 
 
 ## 4. Baixar a planilha consolidada (.xlsx)
 
-1. No rodapé do app, clique em **🔒 Área da Coordenação** e digite a senha (padrão `admin2026`).
+1. No rodapé do app, clique em **🔒 Área da Coordenação** e digite a senha da coordenação.
 2. Clique em **⬇ Baixar Planilha Excel (.xlsx)**. O arquivo **`Agenda_Entrevistas_FGV_DGPE.xlsx`** tem 2 abas:
    - **`Reservas`**: `Timestamp, SlotID, Dia, DiaSemana, Horario, Banca, Estado, Grupo, Nome, Email`;
    - **`Matriz_Vagas`**: as 100 bancas, com ocupação (`0/2`, `1/2`, `2/2`), status (`Disponível` / `Lotada`) e os inscritos de cada uma.
@@ -140,7 +142,7 @@ A cada reserva, o `Code.gs` atualiza três abas na planilha:
 |---|---|---|
 | `Candidatos` | **Coordenação** | `Grupo` (ex.: `AL G1`) · `Nome` · `Email`, uma linha por candidato (5 por grupo) |
 | `Agenda_Teams` | Script (automático) | 1 linha por banca: `Titulo`, `Inicio`/`Fim` (horário de Brasília), e-mails dos avaliadores e candidatos, `Participantes`, `ProntaParaCriar`, `LinkTeams` |
-| `Teams_Links` | Power Automate | `SlotID` · `LinkTeams` · `CriadoEm` de cada reunião criada |
+| `Teams_Links` | Power Automate ou coordenação | `SlotId` · `Grupo` · `LinkTeams`. Pode preencher só `Grupo` + `LinkTeams` à mão |
 
 `ProntaParaCriar` vale **Sim** quando a banca tem os **2 avaliadores** e há candidatos cadastrados para o grupo.
 `LinkTeams` é preenchida por fórmula a partir de `Teams_Links`, então uma banca nunca gera duas reuniões.
@@ -167,9 +169,9 @@ dona do script (limite do Gmail: cerca de 100 e-mails por dia). Para desligar, c
      - Término: `items('Aplicar_a_cada')?['Fim']`
      - Participantes obrigatórios: `items('Aplicar_a_cada')?['Participantes']`
    - **Google Sheets → Inserir linha** na aba `Teams_Links`
-     - SlotID: `items('Aplicar_a_cada')?['SlotID']`
+     - SlotId: `items('Aplicar_a_cada')?['SlotID']`
+     - Grupo: `items('Aplicar_a_cada')?['Grupo']`
      - LinkTeams: *Link para ingressar na reunião*, da etapa anterior
-     - CriadoEm: `utcNow()`
 5. **Salvar → Testar → Manualmente** para criar as reuniões das bancas já completas.
 
 Observações:
@@ -177,6 +179,53 @@ Observações:
 - Se um avaliador ou candidato mudar depois de a reunião ser criada, ajuste o convite no Outlook.
   Outra opção: apague a linha da banca em `Teams_Links` (o fluxo cria uma reunião nova) e cancele a antiga.
 - Se a política da instituição bloquear o conector *Google Sheets* no Power Automate, a alternativa é usar uma planilha Excel no OneDrive.
+
+## 6. Minhas Bancas (avaliação dos candidatos)
+
+Substitui o Google Forms de avaliação. O avaliador abre **Minhas Bancas** (navegação no topo) e vê,
+em ordem de data e horário, as bancas que reservou com o seu e-mail.
+
+- **Antes** de a aba `Candidatos` ter linhas do grupo da banca, o cartão mostra a reserva (dia,
+  horário, banca e dupla) e o aviso *"Os candidatos deste grupo aparecerão aqui automaticamente
+  após o fechamento do lote pela coordenação."*
+- **Depois**, sem nenhuma ação no app, aparecem:
+  - o botão **Entrar na Sala Teams**, se houver link em `Teams_Links`;
+  - os candidatos do grupo, com o status *Pendente*, *Avaliado • Apto (X/15)*,
+    *Avaliado • Não-apto (X/15)* ou *Ausente*.
+- **Ficha de avaliação:**
+  - presença;
+  - chave do vídeo (1 a 4);
+  - 5 critérios (0 a 3, total ao vivo até 15);
+  - parecer (apto ou não-apto);
+  - observações.
+- **Ausente** grava 0 pontos e "Não, não-apto".
+- **Uma ficha por candidato** (chave `Grupo + EmailCandidato`). Se o colega da dupla já preencheu,
+  aparece *"Avaliado por [Nome]"* e o botão **Editar Avaliação**. Ao salvar, a linha da aba
+  `Avaliacoes` é **atualizada**, nunca duplicada.
+- **Privacidade:** o app só recebe os candidatos e as avaliações dos grupos das bancas que o
+  e-mail informado reservou.
+
+### Preencher a aba `Candidatos`
+Uma linha por candidato, com `Grupo` igual ao da grade (`AL G1`, `PI G5`, `SE G23`…).
+Maiúsculas e espaços extras não atrapalham. Para trazer as respostas do Google Forms, copie ou use
+`IMPORTRANGE` para as colunas Grupo, Nome e Email.
+
+## 7. Resultados & Ranking (Área da Coordenação)
+
+Na Área da Coordenação, aba **Resultados & Ranking**:
+- **Indicadores:** total de candidatos, avaliados, pendentes, presentes, ausentes, aptos e não-aptos.
+- **Filtros:** UF, grupo e status.
+- **Ranking consolidado:**
+  1. aptos primeiro;
+  2. depois `TotalPontos` decrescente;
+  3. desempate por `ChaveVideo` decrescente.
+
+  Pendentes ficam no fim.
+- **Exportar Resultados (.xlsx):** gera `Resultados_Ranking_FGV_DGPE.xlsx` com as abas
+  `Ranking_Consolidado` e `Avaliacoes_Detalhadas`.
+
+Essa aba lê **todas** as avaliações pela ação protegida `resultados` do Apps Script. Por isso, ela
+exige `ADMIN_TOKEN` configurado com a senha da coordenação.
 
 ## Regras de negócio
 
