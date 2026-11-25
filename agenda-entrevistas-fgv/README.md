@@ -132,6 +132,52 @@ de cada reserva e o campo da URL do Apps Script.
 
 ---
 
+## 5. Reuniões do Microsoft Teams (Power Automate)
+
+A cada reserva, o `Code.gs` atualiza três abas na planilha:
+
+| Aba | Quem preenche | Conteúdo |
+|---|---|---|
+| `Candidatos` | **Coordenação** | `Grupo` (ex.: `AL G1`) · `Nome` · `Email`, uma linha por candidato (5 por grupo) |
+| `Agenda_Teams` | Script (automático) | 1 linha por banca: `Titulo`, `Inicio`/`Fim` (horário de Brasília), e-mails dos avaliadores e candidatos, `Participantes`, `ProntaParaCriar`, `LinkTeams` |
+| `Teams_Links` | Power Automate | `SlotID` · `LinkTeams` · `CriadoEm` de cada reunião criada |
+
+`ProntaParaCriar` vale **Sim** quando a banca tem os **2 avaliadores** e há candidatos cadastrados para o grupo.
+`LinkTeams` é preenchida por fórmula a partir de `Teams_Links`, então uma banca nunca gera duas reuniões.
+
+Cada avaliador também recebe **um e-mail de confirmação** com os horários reservados, enviado pela conta Google
+dona do script (limite do Gmail: cerca de 100 e-mails por dia). Para desligar, crie a propriedade do script `ENVIAR_EMAILS` = `nao`.
+
+### Atualizar o script (uma vez)
+1. Apps Script → substitua todo o código pelo novo [`scripts/Code.gs`](scripts/Code.gs) → salvar.
+2. Execute `configurar` e aceite a nova permissão (envio de e-mail).
+3. **Implantar → Gerenciar implantações → ✏️ Editar → Versão: Nova versão → Implantar**. A URL `/exec` não muda.
+
+### Fluxo no Power Automate (conta institucional)
+1. <https://make.powerautomate.com> → **+ Criar → Fluxo da nuvem agendado** → repetir a cada **1 hora**.
+2. **Google Sheets → Obter linhas**: entre com a conta Google da planilha. Escolha o arquivo e a aba `Agenda_Teams`.
+3. **Operação de Dados → Filtrar matriz**. Em *De*, use `value` de *Obter linhas*. No modo avançado, cole:
+   `@and(equals(item()?['ProntaParaCriar'], 'Sim'), empty(item()?['LinkTeams']))`
+4. **Aplicar a cada** sobre o *Corpo* do *Filtrar matriz*. Dentro dele:
+   - **Microsoft Teams → Criar uma reunião do Teams**
+     - ID do calendário: *Calendário*
+     - Assunto: `items('Aplicar_a_cada')?['Titulo']`
+     - Fuso horário: **(UTC-03:00) Brasília**
+     - Início: `items('Aplicar_a_cada')?['Inicio']`
+     - Término: `items('Aplicar_a_cada')?['Fim']`
+     - Participantes obrigatórios: `items('Aplicar_a_cada')?['Participantes']`
+   - **Google Sheets → Inserir linha** na aba `Teams_Links`
+     - SlotID: `items('Aplicar_a_cada')?['SlotID']`
+     - LinkTeams: *Link para ingressar na reunião*, da etapa anterior
+     - CriadoEm: `utcNow()`
+5. **Salvar → Testar → Manualmente** para criar as reuniões das bancas já completas.
+
+Observações:
+- O organizador das reuniões é a conta que criou o fluxo.
+- Se um avaliador ou candidato mudar depois de a reunião ser criada, ajuste o convite no Outlook.
+  Outra opção: apague a linha da banca em `Teams_Links` (o fluxo cria uma reunião nova) e cancele a antiga.
+- Se a política da instituição bloquear o conector *Google Sheets* no Power Automate, a alternativa é usar uma planilha Excel no OneDrive.
+
 ## Regras de negócio
 
 | # | Regra | Onde está |
