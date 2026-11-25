@@ -34,7 +34,7 @@ jobs:
         env:
           # Configure em Settings > Secrets and variables > Actions > Variables
           VITE_APPS_SCRIPT_URL: ${{ vars.VITE_APPS_SCRIPT_URL }}
-          VITE_COORD_PASS: ${{ secrets.VITE_COORD_PASS }}
+          VITE_ADMIN_PASSWORD: ${{ secrets.VITE_ADMIN_PASSWORD }}
       - uses: actions/configure-pages@v5
         with:
           enablement: true

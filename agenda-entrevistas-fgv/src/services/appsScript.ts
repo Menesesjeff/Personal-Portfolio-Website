@@ -1,3 +1,14 @@
+import {
+  AUSENTE,
+  CRITERIOS,
+  DADOS_VAZIOS,
+  normalizarGrupo,
+  type Avaliacao,
+  type DadosBancas,
+  type MapaCandidatos,
+  type Parecer,
+  type Presenca,
+} from '../lib/avaliacao';
 import type { Participante, Rejeicao, Reserva, ResultadoReserva } from '../lib/types';
 
 /**
@@ -54,6 +65,86 @@ function normalizarLista(lista: unknown): Reserva[] {
     .filter((r): r is Reserva => r !== null);
 }
 
+function numeroOuNulo(v: unknown): number | null {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Converte uma avaliação vinda do Apps Script (tolerante a campos ausentes). */
+export function normalizarAvaliacao(bruta: Record<string, unknown>): Avaliacao | null {
+  const grupo = normalizarGrupo(String(bruta.grupo ?? ''));
+  const emailCandidato = String(bruta.emailCandidato ?? '').trim().toLowerCase();
+  if (!grupo || !emailCandidato) return null;
+  const presente = (String(bruta.presente ?? '') === AUSENTE ? AUSENTE : 'Sim, presente') as Presenca;
+  const crit = Array.isArray(bruta.criterios) ? bruta.criterios : [];
+  return {
+    timestamp: String(bruta.timestamp ?? ''),
+    slotId: String(bruta.slotId ?? '').toUpperCase(),
+    grupo,
+    candidato: String(bruta.candidato ?? '').trim(),
+    emailCandidato,
+    avaliadorEmail: String(bruta.avaliadorEmail ?? '').trim().toLowerCase(),
+    avaliadorNome: String(bruta.avaliadorNome ?? '').trim(),
+    presente,
+    chaveVideo: numeroOuNulo(bruta.chaveVideo),
+    criterios: CRITERIOS.map((_, i) => numeroOuNulo(crit[i])),
+    totalPontos: numeroOuNulo(bruta.totalPontos) ?? 0,
+    apto: (String(bruta.apto ?? '') === 'Sim, apto' ? 'Sim, apto' : 'Não, não-apto') as Parecer,
+    observacoes: String(bruta.observacoes ?? ''),
+  };
+}
+
+function normalizarCandidatos(bruto: unknown): MapaCandidatos {
+  const mapa: MapaCandidatos = {};
+  if (!bruto || typeof bruto !== 'object') return mapa;
+  for (const [g, lista] of Object.entries(bruto as Record<string, unknown>)) {
+    const grupo = normalizarGrupo(g);
+    if (!grupo || !Array.isArray(lista)) continue;
+    for (const c of lista as Record<string, unknown>[]) {
+      const email = String(c?.email ?? '').trim().toLowerCase();
+      if (!email) continue;
+      (mapa[grupo] ??= []).push({ nome: String(c?.nome ?? '').trim(), email });
+    }
+  }
+  return mapa;
+}
+
+function normalizarMapaUrls(bruto: unknown, chave: (k: string) => string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!bruto || typeof bruto !== 'object') return out;
+  for (const [k, v] of Object.entries(bruto as Record<string, unknown>)) {
+    const url = String(v ?? '').trim();
+    if (/^https?:\/\//i.test(url)) out[chave(k)] = url;
+  }
+  return out;
+}
+
+function normalizarListaAvaliacoes(lista: unknown): Avaliacao[] {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .map((a) => (a && typeof a === 'object' ? normalizarAvaliacao(a as Record<string, unknown>) : null))
+    .filter((a): a is Avaliacao => a !== null);
+}
+
+/** Extrai candidatos/links/avaliações da resposta. `suportado` = false em scripts antigos. */
+export function normalizarDadosBancas(json: Record<string, unknown>): { dados: DadosBancas; suportado: boolean } {
+  const suportado = 'candidatos' in json || 'avaliacoes' in json;
+  if (!suportado) return { dados: DADOS_VAZIOS, suportado };
+  const links = (json.links ?? {}) as Record<string, unknown>;
+  return {
+    suportado,
+    dados: {
+      candidatos: normalizarCandidatos(json.candidatos),
+      links: {
+        porSlot: normalizarMapaUrls(links.porSlot, (k) => k.toUpperCase()),
+        porGrupo: normalizarMapaUrls(links.porGrupo, normalizarGrupo),
+      },
+      avaliacoes: normalizarListaAvaliacoes(json.avaliacoes),
+    },
+  };
+}
+
 type Fetch = typeof fetch;
 
 export class ClienteAppsScript {
@@ -93,6 +184,38 @@ export class ClienteAppsScript {
   async listar(): Promise<Reserva[]> {
     const json = await this.requisitar(undefined, `action=list&t=${Date.now()}`);
     return normalizarLista(json.reservas);
+  }
+
+  /** Reservas + dados das bancas do avaliador (candidatos, links do Teams e avaliações). */
+  async listarCompleto(
+    emailAvaliador: string,
+  ): Promise<{ reservas: Reserva[]; dados: DadosBancas; suportado: boolean }> {
+    const email = emailAvaliador.trim().toLowerCase();
+    const query = `action=list${email ? `&email=${encodeURIComponent(email)}` : ''}&t=${Date.now()}`;
+    const json = await this.requisitar(undefined, query);
+    return { reservas: normalizarLista(json.reservas), ...normalizarDadosBancas(json) };
+  }
+
+  async salvarAvaliacao(avaliacao: Avaliacao): Promise<{ avaliacao: Avaliacao | null; avaliacoes: Avaliacao[]; editada: boolean }> {
+    const json = await this.requisitar({
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'salvarAvaliacao', avaliacao }),
+    });
+    return {
+      avaliacao: json.avaliacao ? normalizarAvaliacao(json.avaliacao as Record<string, unknown>) : null,
+      avaliacoes: normalizarListaAvaliacoes(json.avaliacoes),
+      editada: Boolean(json.editada),
+    };
+  }
+
+  async resultados(token: string): Promise<{ candidatos: MapaCandidatos; avaliacoes: Avaliacao[] }> {
+    const json = await this.requisitar({
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'resultados', token }),
+    });
+    return { candidatos: normalizarCandidatos(json.candidatos), avaliacoes: normalizarListaAvaliacoes(json.avaliacoes) };
   }
 
   async reservar(participante: Participante, slotIds: string[]): Promise<ResultadoReserva> {

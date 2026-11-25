@@ -4,18 +4,23 @@
  *
  * COMO USAR
  * 1. Abra a planilha > Extensões > Apps Script. Apague o conteúdo e cole este arquivo.
- * 2. (Opcional) Configurações do projeto > Propriedades do script > adicione
- *    ADMIN_TOKEN = <mesma senha de VITE_COORD_PASS> para proteger a remoção de reservas.
+ * 2. Configurações do projeto > Propriedades do script > adicione
+ *    ADMIN_TOKEN = <mesma senha da Área da Coordenação>. Ela protege a remoção de
+ *    reservas e é OBRIGATÓRIA para a aba "Resultados & Ranking".
  * 3. Implantar > Nova implantação > Tipo "App da Web"
  *      Executar como: Eu  |  Quem pode acessar: Qualquer pessoa
  * 4. Copie a URL que termina em /exec e configure no app (VITE_APPS_SCRIPT_URL
  *    ou Área da Coordenação > Conexão com o Google Sheets).
  *
  * API
- *   GET  ?action=list                         -> { ok, reservas: [...] }
+ *   GET  ?action=list[&email=avaliador]       -> { ok, reservas, candidatos, links, avaliacoes }
+ *        (candidatos/links/avaliacoes só dos grupos das bancas reservadas por esse e-mail)
  *   POST { action:'reserve', nome, email, slotIds:[...] }
  *                                             -> { ok, aceitas, rejeitadas, reservas }
  *   POST { action:'delete', id, token }       -> { ok, reservas }
+ *   POST { action:'salvarAvaliacao', avaliacao:{...} }
+ *                                             -> { ok, avaliacao, editada, avaliacoes }
+ *   POST { action:'resultados', token }       -> { ok, candidatos, avaliacoes }  (todos)
  *
  * As escritas rodam sob LockService (bloqueio do script), então duas pessoas
  * clicando ao mesmo tempo nunca ultrapassam a capacidade de 2 por banca.
@@ -25,8 +30,14 @@
  *   - Aba "Agenda_Teams": gerada automaticamente, 1 linha por banca, com início/fim
  *     (horário de Brasília) e os e-mails de avaliadores + candidatos.
  *     ProntaParaCriar = "Sim" quando a banca tem 2 avaliadores e candidatos cadastrados.
- *   - Aba "Teams_Links": o Power Automate insere SlotID + link da reunião criada;
- *     a coluna LinkTeams da Agenda_Teams é preenchida por fórmula a partir dela.
+ *   - Aba "Teams_Links": SlotId | Grupo | LinkTeams. O Power Automate (ou a coordenação,
+ *     à mão) insere o link por SlotId ou só por Grupo; a coluna LinkTeams da Agenda_Teams
+ *     e a aba "Minhas Bancas" do app leem daqui.
+ *
+ * AVALIAÇÃO DOS CANDIDATOS (aba "Minhas Bancas" do app — substitui o Google Forms)
+ *   - Aba "Avaliacoes": 1 linha por candidato (chave Grupo + EmailCandidato). Se o outro
+ *     avaliador da banca salvar de novo, a linha é ATUALIZADA (nunca duplicada).
+ *   - TotalPontos = soma dos 5 critérios (0 a 3 cada, máximo 15). Ausente = 0 pontos e não-apto.
  *
  * E-MAILS: cada confirmação envia um e-mail ao avaliador com os horários reservados.
  *   Para desligar, crie a propriedade do script ENVIAR_EMAILS = nao.
@@ -40,7 +51,19 @@ var ANO = 2026; // ano das datas da grade (07/12 a 11/12)
 var ABA_CANDIDATOS = 'Candidatos';
 var CAB_CANDIDATOS = ['Grupo', 'Nome', 'Email'];
 var ABA_LINKS = 'Teams_Links';
-var CAB_LINKS = ['SlotID', 'LinkTeams', 'CriadoEm'];
+var CAB_LINKS = ['SlotId', 'Grupo', 'LinkTeams'];
+var ABA_AVALIACOES = 'Avaliacoes';
+var CAB_AVALIACOES = [
+  'Timestamp', 'SlotId', 'Grupo', 'Candidato', 'EmailCandidato', 'AvaliadorEmail', 'AvaliadorNome',
+  'Presente', 'ChaveVideo', 'Crit1_AnalisePedagogica', 'Crit2_Argumentacao', 'Crit3_MediacaoEscuta',
+  'Crit4_CoerenciaCNCA', 'Crit5_PosturaColaboracao', 'TotalPontos', 'Apto', 'Observacoes'
+];
+var PRESENTE = 'Sim, presente';
+var AUSENTE = 'Não, ausente';
+var APTO = 'Sim, apto';
+var NAO_APTO = 'Não, não-apto';
+var N_CRITERIOS = 5;
+var NOTA_MAX = 3;
 var ABA_AGENDA = 'Agenda_Teams';
 var CAB_AGENDA = [
   'SlotID', 'Titulo', 'Inicio', 'Fim', 'Dia', 'DiaSemana', 'Horario', 'Banca', 'Grupo',
@@ -105,7 +128,12 @@ var SLOTS = construirSlots_();
 function doGet(e) {
   try {
     var acao = (e && e.parameter && e.parameter.action) || 'list';
-    if (acao === 'list') return json_({ ok: true, reservas: lerReservas_() });
+    if (acao === 'list') {
+      var reservas = lerReservas_();
+      var email = String((e.parameter && e.parameter.email) || '').trim().toLowerCase();
+      var dados = dadosDoAvaliador_(email, reservas);
+      return json_({ ok: true, reservas: reservas, candidatos: dados.candidatos, links: dados.links, avaliacoes: dados.avaliacoes });
+    }
     if (acao === 'ping') return json_({ ok: true, ts: new Date().toISOString() });
     return json_({ ok: false, error: 'Ação desconhecida: ' + acao });
   } catch (err) {
@@ -124,6 +152,8 @@ function doPost(e) {
     var corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (corpo.action === 'reserve') return json_(reservar_(corpo));
     if (corpo.action === 'delete') return json_(remover_(corpo));
+    if (corpo.action === 'salvarAvaliacao') return json_(salvarAvaliacao_(corpo));
+    if (corpo.action === 'resultados') return json_(resultados_(corpo));
     return json_({ ok: false, error: 'Ação desconhecida: ' + corpo.action });
   } catch (err) {
     return json_({ ok: false, error: String(err && err.message ? err.message : err) });
@@ -289,22 +319,6 @@ function inicioFim_(s) {
   return { inicio: data + 'T' + h[1] + ':' + h[2] + ':00', fim: data + 'T' + h[3] + ':' + h[4] + ':00' };
 }
 
-/** Mapa "AL G1" -> [{ nome, email }] a partir da aba Candidatos. */
-function lerCandidatos_() {
-  var sh = abaComCabecalho_(ABA_CANDIDATOS, CAB_CANDIDATOS);
-  var n = sh.getLastRow() - 1;
-  var mapa = {};
-  if (n <= 0) return mapa;
-  var valores = sh.getRange(2, 1, n, 3).getValues();
-  for (var i = 0; i < valores.length; i++) {
-    var grupo = normalizarGrupo_(valores[i][0]);
-    var email = String(valores[i][2] || '').trim().toLowerCase();
-    if (!grupo || !email) continue;
-    (mapa[grupo] = mapa[grupo] || []).push({ nome: String(valores[i][1] || '').trim(), email: email });
-  }
-  return mapa;
-}
-
 /** Monta as linhas da aba Agenda_Teams (sem a coluna de fórmula LinkTeams). */
 function montarAgenda_(reservas, candidatos) {
   var porSlot = {};
@@ -351,7 +365,11 @@ function atualizarAgendaTeams_(reservas) {
   sh.getRange(2, 1, linhas.length, linhas[0].length).setValues(linhas);
   var formulas = [];
   for (var i = 0; i < linhas.length; i++) {
-    formulas.push(['=IFERROR(VLOOKUP($A' + (i + 2) + ',' + ABA_LINKS + '!$A:$B,2,FALSE),"")']);
+    var r = i + 2;
+    // Link por SlotId (col. A) ou, se não houver, por Grupo (col. B) da aba Teams_Links.
+    formulas.push([
+      '=IFERROR(VLOOKUP($A' + r + ',' + ABA_LINKS + '!$A:$C,3,FALSE),IFERROR(VLOOKUP($I' + r + ',' + ABA_LINKS + '!$B:$C,2,FALSE),""))'
+    ]);
   }
   sh.getRange(2, CAB_AGENDA.length, linhas.length, 1).setFormulas(formulas);
 }
@@ -409,6 +427,236 @@ function enviarConfirmacao_(nome, email, aceitas) {
 function configurar() {
   aba_();
   abaComCabecalho_(ABA_CANDIDATOS, CAB_CANDIDATOS);
+  abaComCabecalho_(ABA_AVALIACOES, CAB_AVALIACOES);
   atualizarAgendaTeams_();
   Logger.log('Abas prontas. %s slots. Cota de e-mails hoje: %s', Object.keys(SLOTS).length, MailApp.getRemainingDailyQuota());
+}
+
+// ----------------------------------------------------------------------------
+// Leitura tolerante por cabeçalho (as colunas podem ter sido reordenadas à mão)
+// ----------------------------------------------------------------------------
+function chaveCabecalho_(t) {
+  return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+/** Lê uma aba como lista de objetos indexados pelo cabeçalho normalizado (ex.: "slotid", "linkteams"). */
+function lerTabela_(nome, cabecalho) {
+  var sh = abaComCabecalho_(nome, cabecalho);
+  var ultimaLinha = sh.getLastRow();
+  var ultimaColuna = Math.max(cabecalho.length, sh.getLastColumn ? sh.getLastColumn() : cabecalho.length);
+  if (ultimaLinha < 2) return [];
+  var valores = sh.getRange(1, 1, ultimaLinha, ultimaColuna).getValues();
+  var nomes = valores[0].map(chaveCabecalho_);
+  var linhas = [];
+  for (var i = 1; i < valores.length; i++) {
+    var obj = { _linha: i + 1 };
+    var vazia = true;
+    for (var c = 0; c < nomes.length; c++) {
+      if (!nomes[c]) continue;
+      obj[nomes[c]] = valores[i][c];
+      if (valores[i][c] !== '' && valores[i][c] !== null) vazia = false;
+    }
+    if (!vazia) linhas.push(obj);
+  }
+  return linhas;
+}
+
+function texto_(v) {
+  return v === null || v === undefined ? '' : String(v).trim();
+}
+
+// ----------------------------------------------------------------------------
+// Candidatos, links do Teams e avaliações
+// ----------------------------------------------------------------------------
+/** Mapa "AL G1" -> [{ nome, email }] a partir da aba Candidatos (Grupo normalizado com trim). */
+function lerCandidatos_() {
+  var mapa = {};
+  var linhas = lerTabela_(ABA_CANDIDATOS, CAB_CANDIDATOS);
+  for (var i = 0; i < linhas.length; i++) {
+    var grupo = normalizarGrupo_(linhas[i].grupo);
+    var email = texto_(linhas[i].email).toLowerCase();
+    if (!grupo || !email) continue;
+    (mapa[grupo] = mapa[grupo] || []).push({ nome: texto_(linhas[i].nome), email: email });
+  }
+  return mapa;
+}
+
+/** { porSlot: { "SLOT-001": url }, porGrupo: { "AL G1": url } } */
+function lerLinks_() {
+  var links = { porSlot: {}, porGrupo: {} };
+  var linhas = lerTabela_(ABA_LINKS, CAB_LINKS);
+  for (var i = 0; i < linhas.length; i++) {
+    var url = texto_(linhas[i].linkteams);
+    if (!/^https?:\/\//i.test(url)) continue;
+    var slot = texto_(linhas[i].slotid).toUpperCase();
+    var grupo = normalizarGrupo_(linhas[i].grupo);
+    if (slot && SLOTS[slot]) links.porSlot[slot] = url;
+    if (grupo) links.porGrupo[grupo] = url;
+  }
+  return links;
+}
+
+function numeroOuNulo_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  var n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
+function lerAvaliacoes_() {
+  var linhas = lerTabela_(ABA_AVALIACOES, CAB_AVALIACOES);
+  var lista = [];
+  for (var i = 0; i < linhas.length; i++) {
+    var l = linhas[i];
+    var grupo = normalizarGrupo_(l.grupo);
+    var emailCand = texto_(l.emailcandidato).toLowerCase();
+    if (!grupo || !emailCand) continue;
+    lista.push({
+      linha: l._linha,
+      timestamp: l.timestamp instanceof Date ? l.timestamp.toISOString() : texto_(l.timestamp),
+      slotId: texto_(l.slotid).toUpperCase(),
+      grupo: grupo,
+      candidato: texto_(l.candidato),
+      emailCandidato: emailCand,
+      avaliadorEmail: texto_(l.avaliadoremail).toLowerCase(),
+      avaliadorNome: texto_(l.avaliadornome),
+      presente: texto_(l.presente),
+      chaveVideo: numeroOuNulo_(l.chavevideo),
+      criterios: [
+        numeroOuNulo_(l.crit1analisepedagogica),
+        numeroOuNulo_(l.crit2argumentacao),
+        numeroOuNulo_(l.crit3mediacaoescuta),
+        numeroOuNulo_(l.crit4coerenciacnca),
+        numeroOuNulo_(l.crit5posturacolaboracao)
+      ],
+      totalPontos: numeroOuNulo_(l.totalpontos) || 0,
+      apto: texto_(l.apto),
+      observacoes: texto_(l.observacoes)
+    });
+  }
+  return lista;
+}
+
+function semLinha_(lista) {
+  return lista.map(function (a) {
+    var c = {};
+    for (var k in a) if (k !== 'linha') c[k] = a[k];
+    return c;
+  });
+}
+
+/** Grupos (normalizados) e slots das bancas reservadas por um avaliador. */
+function bancasDoAvaliador_(email, reservas) {
+  var grupos = {};
+  var slots = {};
+  for (var i = 0; i < reservas.length; i++) {
+    if (!email || reservas[i].email !== email) continue;
+    var s = SLOTS[reservas[i].slotId];
+    if (!s) continue;
+    slots[s.id] = true;
+    if (s.estado !== 'Livre') grupos[normalizarGrupo_(rotuloSlot_(s))] = s.id;
+  }
+  return { grupos: grupos, slots: slots };
+}
+
+/** Apenas os dados dos grupos das bancas desse avaliador (privacidade). */
+function dadosDoAvaliador_(email, reservas) {
+  var vazio = { candidatos: {}, links: { porSlot: {}, porGrupo: {} }, avaliacoes: [] };
+  if (!email) return vazio;
+  var minhas = bancasDoAvaliador_(email, reservas);
+  if (Object.keys(minhas.slots).length === 0) return vazio;
+  var todosCand = lerCandidatos_();
+  var todosLinks = lerLinks_();
+  var dados = vazio;
+  for (var g in minhas.grupos) if (todosCand[g]) dados.candidatos[g] = todosCand[g];
+  for (var sl in minhas.slots) if (todosLinks.porSlot[sl]) dados.links.porSlot[sl] = todosLinks.porSlot[sl];
+  for (var g2 in minhas.grupos) if (todosLinks.porGrupo[g2]) dados.links.porGrupo[g2] = todosLinks.porGrupo[g2];
+  dados.avaliacoes = semLinha_(lerAvaliacoes_().filter(function (a) { return minhas.grupos[a.grupo]; }));
+  return dados;
+}
+
+function inteiroEntre_(v, min, max) {
+  var n = Number(v);
+  return v !== null && v !== '' && isFinite(n) && Math.floor(n) === n && n >= min && n <= max ? n : null;
+}
+
+/** Grava (ou atualiza) a avaliação de um candidato. Roda sob o LockService do doPost. */
+function salvarAvaliacao_(corpo) {
+  var a = corpo.avaliacao || {};
+  var slotId = texto_(a.slotId).toUpperCase();
+  var s = SLOTS[slotId];
+  var avaliadorEmail = texto_(a.avaliadorEmail).toLowerCase();
+  var avaliadorNome = texto_(a.avaliadorNome).replace(/\s+/g, ' ');
+  var emailCand = texto_(a.emailCandidato).toLowerCase();
+  if (!s || s.estado === 'Livre') return { ok: false, error: 'Banca inválida para avaliação.' };
+  var grupo = normalizarGrupo_(rotuloSlot_(s));
+  if (a.grupo && normalizarGrupo_(a.grupo) !== grupo) return { ok: false, error: 'O grupo não corresponde à banca.' };
+  if (!EMAIL_RE.test(avaliadorEmail)) return { ok: false, error: 'E-mail do avaliador inválido.' };
+
+  var reservas = lerReservas_();
+  var reservou = reservas.some(function (r) { return r.slotId === slotId && r.email === avaliadorEmail; });
+  if (!reservou) return { ok: false, error: 'Só os avaliadores desta banca podem avaliar este grupo.' };
+
+  var candidatos = lerCandidatos_()[grupo] || [];
+  var cand = candidatos.filter(function (c) { return c.email === emailCand; })[0];
+  if (!cand) return { ok: false, error: 'Candidato não encontrado neste grupo (aba Candidatos).' };
+
+  var presente = texto_(a.presente);
+  if (presente !== PRESENTE && presente !== AUSENTE) return { ok: false, error: 'Informe se o candidato estava presente.' };
+  var ausente = presente === AUSENTE;
+  var crit = [];
+  var chave = null;
+  var apto = NAO_APTO;
+  var total = 0;
+  if (!ausente) {
+    chave = inteiroEntre_(a.chaveVideo, 1, 4);
+    if (chave === null) return { ok: false, error: 'Chave de correção do vídeo deve ser de 1 a 4.' };
+    var notas = a.criterios instanceof Array ? a.criterios : [];
+    for (var i = 0; i < N_CRITERIOS; i++) {
+      var n = inteiroEntre_(notas[i], 0, NOTA_MAX);
+      if (n === null) return { ok: false, error: 'Cada critério deve ter nota de 0 a 3.' };
+      crit.push(n);
+      total += n;
+    }
+    apto = texto_(a.apto);
+    if (apto !== APTO && apto !== NAO_APTO) return { ok: false, error: 'Informe o parecer final.' };
+  } else {
+    for (var j = 0; j < N_CRITERIOS; j++) crit.push('');
+  }
+
+  var agora = new Date();
+  var linha = [
+    agora, slotId, grupo, cand.nome, emailCand, avaliadorEmail, avaliadorNome, presente,
+    ausente ? '' : chave, crit[0], crit[1], crit[2], crit[3], crit[4], total, apto, texto_(a.observacoes)
+  ];
+
+  var sh = abaComCabecalho_(ABA_AVALIACOES, CAB_AVALIACOES);
+  var existentes = lerAvaliacoes_();
+  var alvo = null;
+  for (var k = 0; k < existentes.length; k++) {
+    if (existentes[k].grupo === grupo && existentes[k].emailCandidato === emailCand) alvo = existentes[k];
+  }
+  if (alvo) sh.getRange(alvo.linha, 1, 1, CAB_AVALIACOES.length).setValues([linha]);
+  else sh.getRange(sh.getLastRow() + 1, 1, 1, CAB_AVALIACOES.length).setValues([linha]);
+  sh.getRange(alvo ? alvo.linha : sh.getLastRow(), 1, 1, 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+
+  var salva = {
+    timestamp: agora.toISOString(), slotId: slotId, grupo: grupo, candidato: cand.nome, emailCandidato: emailCand,
+    avaliadorEmail: avaliadorEmail, avaliadorNome: avaliadorNome, presente: presente, chaveVideo: ausente ? null : chave,
+    criterios: ausente ? [null, null, null, null, null] : crit, totalPontos: total, apto: apto,
+    observacoes: texto_(a.observacoes)
+  };
+  return {
+    ok: true,
+    editada: Boolean(alvo),
+    avaliacao: salva,
+    avaliacoes: dadosDoAvaliador_(avaliadorEmail, reservas).avaliacoes
+  };
+}
+
+/** Todos os candidatos e avaliações (Resultados & Ranking). Exige ADMIN_TOKEN configurado. */
+function resultados_(corpo) {
+  var esperado = PropertiesService.getScriptProperties().getProperty('ADMIN_TOKEN');
+  if (!esperado) return { ok: false, error: 'Configure a propriedade ADMIN_TOKEN no Apps Script para liberar os resultados.' };
+  if (String(corpo.token || '') !== esperado) return { ok: false, error: 'Não autorizado.' };
+  return { ok: true, candidatos: lerCandidatos_(), avaliacoes: semLinha_(lerAvaliacoes_()) };
 }

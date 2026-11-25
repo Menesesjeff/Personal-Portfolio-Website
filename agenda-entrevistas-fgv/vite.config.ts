@@ -16,5 +16,7 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['tests/**/*.test.{ts,tsx}'],
     setupFiles: ['tests/setup.ts'],
+    // Senha usada só nos testes automatizados (a senha real nunca fica no código).
+    env: { VITE_ADMIN_PASSWORD: 'senha-de-teste-123' },
   },
 });

@@ -64,7 +64,7 @@ describe('fluxo do participante (UI, modo local)', () => {
     fireEvent.change(input, { target: { value: 'errada' } });
     fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
     expect(screen.getByText('Senha incorreta.')).toBeTruthy();
-    fireEvent.change(input, { target: { value: 'admin2026' } });
+    fireEvent.change(input, { target: { value: 'senha-de-teste-123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
     expect(screen.getByText('Total de Bancas')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Baixar Planilha Excel/ })).toBeTruthy();

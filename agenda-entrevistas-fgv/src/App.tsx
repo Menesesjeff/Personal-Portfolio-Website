@@ -7,6 +7,7 @@ import { GradeDesktop } from './components/Grade';
 import { BarraFiltros, GradeDia, SeletorDias } from './components/GradeDia';
 import { Identificacao } from './components/Identificacao';
 import { Legenda } from './components/Legenda';
+import { MinhasBancas } from './components/MinhasBancas';
 import { Modal } from './components/Modal';
 import { ResumoSelecao } from './components/ResumoSelecao';
 import { DIAS, descreverSlot, SLOT_POR_ID } from './data/grade';
@@ -62,6 +63,8 @@ export default function App() {
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [senhaAberta, setSenhaAberta] = useState(false);
   const [painelAberto, setPainelAberto] = useState(false);
+  const [tokenCoord, setTokenCoord] = useState(() => lerSessao(CHAVES.tokenCoordenacao) ?? '');
+  const [abaPrincipal, setAbaPrincipal] = useState<'grade' | 'minhas'>('grade');
   const refIdent = useRef<HTMLElement>(null);
   const [diaAtivo, setDiaAtivo] = useState(DIAS[0].id);
   const [filtros, setFiltros] = useState<FiltrosGrade>(FILTROS_VAZIOS);
@@ -73,6 +76,11 @@ export default function App() {
   const erros = useMemo(() => validarIdentificacao(participante), [participante]);
 
   // Mantém a seleção coerente quando chegam novas reservas (ex.: banca lotou) ou o e-mail muda.
+  // Traz candidatos/links/avaliações das bancas deste avaliador (aba "Minhas Bancas").
+  useEffect(() => {
+    sync.definirAvaliador(participante.email);
+  }, [sync, participante.email]);
+
   useEffect(() => {
     setSelecao((atual) => {
       const saneada = sanearSelecao(atual, reservas, participante.email);
@@ -122,13 +130,21 @@ export default function App() {
   const removerDaSelecao = (id: string) => setSelecao((atual) => atual.filter((x) => x !== id));
   const limparSelecao = () => setSelecao([]);
   const verSemana = desktop && visao === 'semana';
+  const identificacaoValida = Object.keys(erros).length === 0;
+  const naGrade = abaPrincipal === 'grade';
 
   return (
-    <div className="min-h-dvh pb-48 md:pb-0">
+    <div className={`min-h-dvh md:pb-0 ${naGrade ? 'pb-48' : 'pb-6'}`}>
       <BannerInstalacao />
       <Cabecalho status={agenda.status} ultimaSync={agenda.ultimaSync} pendentes={agenda.pendentes} mensagem={agenda.mensagem} />
 
-      <div className="mx-auto max-w-7xl px-4 py-5 md:grid md:grid-cols-[minmax(0,1fr)_280px] md:items-start md:gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div
+        className={`mx-auto px-4 py-5 ${
+          naGrade
+            ? 'max-w-7xl md:grid md:grid-cols-[minmax(0,1fr)_280px] md:items-start md:gap-5 lg:grid-cols-[minmax(0,1fr)_320px]'
+            : 'max-w-4xl'
+        }`}
+      >
         <main className="min-w-0 space-y-5">
           <Identificacao
             ref={refIdent}
@@ -140,6 +156,53 @@ export default function App() {
             selecionados={selecao.length}
           />
 
+          <nav className="flex gap-1 rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200" aria-label="Navegação principal">
+            {(
+              [
+                ['grade', 'Grade de Bancas', null],
+                ['minhas', 'Minhas Bancas', minhas.length],
+              ] as const
+            ).map(([id, rotulo, contagem]) => (
+              <button
+                key={id}
+                type="button"
+                aria-current={abaPrincipal === id ? 'page' : undefined}
+                onClick={() => setAbaPrincipal(id)}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                  abaPrincipal === id ? 'bg-fgv-marinho text-white shadow' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {rotulo}
+                {contagem !== null && contagem > 0 && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${
+                      abaPrincipal === id ? 'bg-emerald-400 text-fgv-escuro' : 'bg-emerald-100 text-emerald-800'
+                    }`}
+                  >
+                    {contagem}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+
+          {!naGrade && (
+            <MinhasBancas
+              participante={participante}
+              identificacaoValida={identificacaoValida}
+              reservas={reservas}
+              dados={agenda.dados}
+              avaliacaoDisponivel={agenda.avaliacaoDisponivel}
+              aoSalvar={(av) => sync.salvarAvaliacao(av)}
+              aoIrParaGrade={() => {
+                setAbaPrincipal('grade');
+                setMostrarErros(true);
+                refIdent.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+            />
+          )}
+
+          {naGrade && (
           <section aria-labelledby="etapa2" className="space-y-3">
             <div className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -194,7 +257,9 @@ export default function App() {
             )}
           </section>
 
-          {!desktop && minhas.length > 0 && (
+          )}
+
+          {naGrade && !desktop && minhas.length > 0 && (
             <section className="rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
               <h2 className="mb-2 text-sm font-bold text-emerald-900">Seus horários confirmados ({minhas.length})</h2>
               <ul className="flex flex-wrap gap-2">
@@ -212,7 +277,7 @@ export default function App() {
           )}
         </main>
 
-        {desktop && (
+        {desktop && naGrade && (
           <ResumoSelecao
             selecao={selecao}
             confirmadas={minhas}
@@ -229,7 +294,7 @@ export default function App() {
           <p>© {new Date().getFullYear()} FGV DGPE · Agenda das Bancas</p>
           <button
             type="button"
-            onClick={() => (lerSessao(CHAVES.coordenacao) === '1' ? setPainelAberto(true) : setSenhaAberta(true))}
+            onClick={() => (tokenCoord ? setPainelAberto(true) : setSenhaAberta(true))}
             className="rounded-lg border border-slate-300 px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50"
           >
             🔒 Área da Coordenação
@@ -237,7 +302,7 @@ export default function App() {
         </div>
       </footer>
 
-      {!desktop && (
+      {!desktop && naGrade && (
         <BarraSelecao
           selecao={selecao}
           aoRemover={removerDaSelecao}
@@ -325,8 +390,10 @@ export default function App() {
       <ModalSenha
         aberto={senhaAberta}
         aoFechar={() => setSenhaAberta(false)}
-        aoDesbloquear={() => {
+        aoDesbloquear={(senha) => {
           gravarSessao(CHAVES.coordenacao, '1');
+          gravarSessao(CHAVES.tokenCoordenacao, senha);
+          setTokenCoord(senha);
           setSenhaAberta(false);
           setPainelAberto(true);
         }}
@@ -342,6 +409,7 @@ export default function App() {
           mensagem={agenda.mensagem}
           endpoint={agenda.endpoint}
           sync={sync}
+          token={tokenCoord}
         />
       )}
     </div>

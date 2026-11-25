@@ -7,10 +7,19 @@ import {
   SLOTS,
   SLOT_POR_ID,
 } from '../data/grade';
+import {
+  COLUNAS_AVALIACOES,
+  CRITERIOS,
+  PONTUACAO_MAXIMA,
+  rotuloStatus,
+  type Avaliacao,
+  type LinhaRanking,
+} from '../lib/avaliacao';
 import type { Reserva } from '../lib/types';
 
 export const NOME_ARQUIVO_XLSX = 'Agenda_Entrevistas_FGV_DGPE.xlsx';
 export const NOME_ARQUIVO_CSV = 'Agenda_Entrevistas_FGV_DGPE.csv';
+export const NOME_ARQUIVO_RESULTADOS = 'Resultados_Ranking_FGV_DGPE.xlsx';
 
 export const COLUNAS_RESERVAS = [
   'Timestamp',
@@ -165,4 +174,89 @@ export async function baixarXlsx(reservas: Reserva[]): Promise<void> {
 
 export function baixarCsv(reservas: Reserva[]): void {
   baixarBlob(new Blob([gerarCsv(reservas)], { type: 'text/csv;charset=utf-8' }), NOME_ARQUIVO_CSV);
+}
+
+// ---------------------------------------------------------------------------
+// Resultados & Ranking — 2 abas: Ranking_Consolidado e Avaliacoes_Detalhadas
+// ---------------------------------------------------------------------------
+
+export const COLUNAS_RANKING = [
+  'Posicao',
+  'UF',
+  'Grupo',
+  'Candidato',
+  'EmailCandidato',
+  'Status',
+  'Presente',
+  'TotalPontos',
+  'ChaveVideo',
+  'Apto',
+  'AvaliadorNome',
+  'AvaliadorEmail',
+  'AvaliadoEm',
+] as const;
+
+export function linhasRanking(ranking: LinhaRanking[]): Record<(typeof COLUNAS_RANKING)[number], string | number> [] {
+  return ranking.map((l) => ({
+    Posicao: l.posicao,
+    UF: l.uf,
+    Grupo: l.grupo,
+    Candidato: l.candidato,
+    EmailCandidato: l.emailCandidato,
+    Status: rotuloStatus(l.avaliacao),
+    Presente: l.avaliacao?.presente ?? '',
+    TotalPontos: l.avaliacao ? l.avaliacao.totalPontos : '',
+    ChaveVideo: l.avaliacao?.chaveVideo ?? '',
+    Apto: l.avaliacao?.apto ?? '',
+    AvaliadorNome: l.avaliacao?.avaliadorNome ?? '',
+    AvaliadorEmail: l.avaliacao?.avaliadorEmail ?? '',
+    AvaliadoEm: l.avaliacao ? formatarTimestamp(l.avaliacao.timestamp) : '',
+  }));
+}
+
+export function linhasAvaliacoes(avaliacoes: Avaliacao[]): Record<string, string | number>[] {
+  return [...avaliacoes]
+    .sort((a, b) => a.grupo.localeCompare(b.grupo, 'pt-BR', { numeric: true }) || a.candidato.localeCompare(b.candidato, 'pt-BR'))
+    .map((a) => {
+      const linha: Record<string, string | number> = {
+        Timestamp: formatarTimestamp(a.timestamp),
+        SlotId: a.slotId,
+        Grupo: a.grupo,
+        Candidato: a.candidato,
+        EmailCandidato: a.emailCandidato,
+        AvaliadorEmail: a.avaliadorEmail,
+        AvaliadorNome: a.avaliadorNome,
+        Presente: a.presente,
+        ChaveVideo: a.chaveVideo ?? '',
+      };
+      CRITERIOS.forEach((c, i) => (linha[c.coluna] = a.criterios[i] ?? ''));
+      linha.TotalPontos = a.totalPontos;
+      linha.Apto = a.apto;
+      linha.Observacoes = a.observacoes;
+      return linha;
+    });
+}
+
+export function montarWorkbookResultados(XLSX: XLSXModule, ranking: LinhaRanking[], avaliacoes: Avaliacao[]): WorkBook {
+  const wb = XLSX.utils.book_new();
+  const wsRank = XLSX.utils.json_to_sheet(linhasRanking(ranking), { header: [...COLUNAS_RANKING] });
+  wsRank['!cols'] = [8, 5, 9, 32, 32, 26, 14, 11, 10, 14, 28, 30, 20].map((wch) => ({ wch }));
+  wsRank['!autofilter'] = { ref: `A1:M${Math.max(ranking.length + 1, 1)}` };
+  XLSX.utils.book_append_sheet(wb, wsRank, 'Ranking_Consolidado');
+
+  const wsAval = XLSX.utils.json_to_sheet(linhasAvaliacoes(avaliacoes), { header: [...COLUNAS_AVALIACOES] });
+  wsAval['!cols'] = COLUNAS_AVALIACOES.map((c) => ({ wch: Math.max(10, c.length + 2) }));
+  XLSX.utils.book_append_sheet(wb, wsAval, 'Avaliacoes_Detalhadas');
+  wb.Props = { Title: `Resultados & Ranking (máx. ${PONTUACAO_MAXIMA} pts) — FGV DGPE`, Author: 'FGV DGPE' };
+  return wb;
+}
+
+export async function baixarResultadosXlsx(ranking: LinhaRanking[], avaliacoes: Avaliacao[]): Promise<void> {
+  const XLSX = await import('xlsx');
+  const wb = montarWorkbookResultados(XLSX, ranking, avaliacoes);
+  const dados = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+  baixarBlob(
+    new Blob([dados], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    NOME_ARQUIVO_RESULTADOS,
+  );
 }

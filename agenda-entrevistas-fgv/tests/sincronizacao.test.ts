@@ -165,3 +165,52 @@ describe('Sincronizador', () => {
     sair();
   });
 });
+
+describe('Sincronizador — avaliações', () => {
+  it('lê candidatos, links e avaliações do GET list (com o e-mail do avaliador)', async () => {
+    const fetcher = vi.fn(async (url: string) => {
+      expect(url).toContain('email=ana%40fgv.br');
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          reservas: [{ id: 'R1', timestamp: '2026-11-20T12:00:00Z', slotId: 'SLOT-001', nome: 'Ana', email: 'ana@fgv.br' }],
+          candidatos: { ' al g1 ': [{ nome: 'C1', email: ' C1@X.com ' }] },
+          links: { porSlot: { 'slot-001': 'https://teams/x' }, porGrupo: { 'al g1': 'javascript:alert(1)' } },
+          avaliacoes: [{ grupo: 'AL G1', emailCandidato: 'c1@x.com', presente: 'Não, ausente', totalPontos: 0, apto: 'Não, não-apto' }],
+        }),
+      );
+    });
+    const sync = new Sincronizador(criarArmazenamentoMemoria(), URL_EXEC, (u) => new ClienteAppsScript(u, fetcher as unknown as typeof fetch));
+    sync.definirAvaliador('ANA@fgv.br');
+    await sync.sincronizar();
+    expect(sync.atual.dados.candidatos).toEqual({ 'AL G1': [{ nome: 'C1', email: 'c1@x.com' }] });
+    expect(sync.atual.dados.links).toEqual({ porSlot: { 'SLOT-001': 'https://teams/x' }, porGrupo: {} });
+    expect(sync.atual.dados.avaliacoes[0]).toMatchObject({ presente: 'Não, ausente', apto: 'Não, não-apto' });
+    expect(sync.atual.avaliacaoDisponivel).toBe(true);
+  });
+
+  it('script antigo (sem candidatos na resposta) desativa a avaliação sem quebrar as reservas', async () => {
+    const srv = servidorFalso([{ id: 'X', timestamp: '2026-11-20T12:00:00.000Z', slotId: 'SLOT-005', nome: 'Zé Lima', email: 'ze@x.com' }]);
+    const { sync } = criar(srv);
+    await sync.sincronizar();
+    expect(sync.atual.reservas).toHaveLength(1);
+    expect(sync.atual.avaliacaoDisponivel).toBe(false);
+  });
+
+  it('modo local: salva avaliação sem duplicar e recusa quem não é da banca', async () => {
+    const arm = criarArmazenamentoMemoria();
+    arm.gravar(CHAVES.dadosBancas, { candidatos: { 'AL G1': [{ nome: 'C1', email: 'c1@x.com' }] }, links: { porSlot: {}, porGrupo: {} }, avaliacoes: [] });
+    const sync = new Sincronizador(arm, '');
+    await sync.confirmar(EU, ['SLOT-001']);
+    const base = {
+      timestamp: 't', slotId: 'SLOT-001', grupo: 'AL G1', candidato: 'C1', emailCandidato: 'c1@x.com',
+      avaliadorEmail: 'ana@fgv.br', avaliadorNome: 'Ana Lima', presente: 'Sim, presente' as const, chaveVideo: 3,
+      criterios: [1, 1, 1, 1, 1], totalPontos: 5, apto: 'Não, não-apto' as const, observacoes: '',
+    };
+    expect(await sync.salvarAvaliacao(base)).toEqual({ editada: false });
+    expect(await sync.salvarAvaliacao({ ...base, totalPontos: 9 })).toEqual({ editada: true });
+    expect(sync.atual.dados.avaliacoes).toHaveLength(1);
+    await expect(sync.salvarAvaliacao({ ...base, avaliadorEmail: 'outro@x.com' })).rejects.toThrow(/Só os avaliadores/);
+    expect((await sync.carregarResultados('qualquer')).avaliacoes).toHaveLength(1);
+  });
+});

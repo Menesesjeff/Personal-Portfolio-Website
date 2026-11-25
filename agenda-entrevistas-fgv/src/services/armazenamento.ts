@@ -8,6 +8,8 @@ export const CHAVES = {
   selecao: 'fgv-agenda:selecao',
   bannerInstalacao: 'fgv-agenda:banner-instalacao-fechado',
   coordenacao: 'fgv-agenda:coord-desbloqueada',
+  tokenCoordenacao: 'fgv-agenda:coord-token',
+  dadosBancas: 'fgv-agenda:dados-bancas',
 } as const;
 
 export interface Armazenamento {
