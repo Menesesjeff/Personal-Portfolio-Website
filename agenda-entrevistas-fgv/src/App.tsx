@@ -3,14 +3,17 @@ import { BannerInstalacao } from './components/BannerInstalacao';
 import { BarraSelecao } from './components/BarraSelecao';
 import { Cabecalho } from './components/Cabecalho';
 import { ModalSenha, PainelCoordenacao } from './components/Coordenacao';
-import { GradeDesktop, GradeMobile } from './components/Grade';
+import { GradeDesktop } from './components/Grade';
+import { BarraFiltros, GradeDia, SeletorDias } from './components/GradeDia';
 import { Identificacao } from './components/Identificacao';
 import { Legenda } from './components/Legenda';
 import { Modal } from './components/Modal';
-import { descreverSlot, SLOT_POR_ID } from './data/grade';
+import { ResumoSelecao } from './components/ResumoSelecao';
+import { DIAS, descreverSlot, SLOT_POR_ID } from './data/grade';
 import { useAgenda } from './hooks/useAgenda';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { usePersistente } from './hooks/usePersistente';
+import { FILTROS_VAZIOS, type FiltrosGrade } from './lib/filtros';
 import {
   alternarSelecao,
   contarPorSlot,
@@ -60,9 +63,13 @@ export default function App() {
   const [senhaAberta, setSenhaAberta] = useState(false);
   const [painelAberto, setPainelAberto] = useState(false);
   const refIdent = useRef<HTMLElement>(null);
+  const [diaAtivo, setDiaAtivo] = useState(DIAS[0].id);
+  const [filtros, setFiltros] = useState<FiltrosGrade>(FILTROS_VAZIOS);
+  const [visao, setVisao] = useState<'dia' | 'semana'>('dia');
 
   const ocupacao = useMemo(() => contarPorSlot(reservas), [reservas]);
   const minhas = useMemo(() => reservasDoParticipante(participante.email, reservas), [participante.email, reservas]);
+  const confirmados = useMemo(() => minhas.map((r) => r.slotId), [minhas]);
   const erros = useMemo(() => validarIdentificacao(participante), [participante]);
 
   // Mantém a seleção coerente quando chegam novas reservas (ex.: banca lotou) ou o e-mail muda.
@@ -112,56 +119,110 @@ export default function App() {
     }
   };
 
-  const propsGrade = { estadoDe, ocupacao, selecao, aoAlternar };
+  const removerDaSelecao = (id: string) => setSelecao((atual) => atual.filter((x) => x !== id));
+  const limparSelecao = () => setSelecao([]);
+  const verSemana = desktop && visao === 'semana';
 
   return (
-    <div className="min-h-dvh pb-40 md:pb-28">
+    <div className="min-h-dvh pb-48 md:pb-0">
       <BannerInstalacao />
       <Cabecalho status={agenda.status} ultimaSync={agenda.ultimaSync} pendentes={agenda.pendentes} mensagem={agenda.mensagem} />
 
-      <main className="mx-auto max-w-7xl space-y-5 px-4 py-5">
-        <Identificacao
-          ref={refIdent}
-          participante={participante}
-          aoAlterar={setParticipante}
-          erros={erros}
-          mostrarErros={mostrarErros}
-          confirmados={minhas.length}
-          selecionados={selecao.length}
-        />
+      <div className="mx-auto max-w-7xl px-4 py-5 md:grid md:grid-cols-[minmax(0,1fr)_280px] md:items-start md:gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <main className="min-w-0 space-y-5">
+          <Identificacao
+            ref={refIdent}
+            participante={participante}
+            aoAlterar={setParticipante}
+            erros={erros}
+            mostrarErros={mostrarErros}
+            confirmados={minhas.length}
+            selecionados={selecao.length}
+          />
 
-        <section aria-labelledby="etapa2" className="space-y-3">
-          <div className="flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
-            <h2 id="etapa2" className="flex items-center gap-2 text-base font-bold text-fgv-marinho">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-fgv-marinho text-xs text-white">2</span>
-              Escolha suas bancas
-            </h2>
-            <p className="text-sm text-slate-600">
-              Marque quantos horários desejar. Em cada faixa horária de um mesmo dia é possível escolher{' '}
-              <strong>apenas 1 banca</strong> (A, B, C ou D). Cada banca comporta no máximo <strong>2 avaliadores</strong>.
-            </p>
-            <Legenda />
-          </div>
-          {desktop ? <GradeDesktop {...propsGrade} /> : <GradeMobile {...propsGrade} />}
-        </section>
+          <section aria-labelledby="etapa2" className="space-y-3">
+            <div className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 id="etapa2" className="flex items-center gap-2 text-base font-bold text-fgv-marinho">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-fgv-marinho text-xs text-white">2</span>
+                  Escolha suas bancas
+                </h2>
+                {desktop && (
+                  <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-xs font-semibold" role="group" aria-label="Modo de visualização">
+                    {(['dia', 'semana'] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        aria-pressed={visao === v}
+                        onClick={() => setVisao(v)}
+                        className={`rounded-md px-3 py-1.5 transition ${
+                          visao === v ? 'bg-white text-fgv-marinho shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        {v === 'dia' ? 'Por dia' : 'Semana inteira'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="text-sm text-slate-600">
+                Marque quantos horários desejar. Em cada faixa horária de um mesmo dia é possível escolher{' '}
+                <strong>apenas 1 banca</strong> (A, B, C ou D). Cada banca comporta no máximo <strong>2 avaliadores</strong>.
+              </p>
+              <Legenda />
+            </div>
 
-        {minhas.length > 0 && (
-          <section className="rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
-            <h2 className="mb-2 text-sm font-bold text-emerald-900">Seus horários confirmados ({minhas.length})</h2>
-            <ul className="flex flex-wrap gap-2">
-              {[...minhas]
-                .sort((a, b) => a.slotId.localeCompare(b.slotId))
-                .map((r) => (
-                  <li key={r.id} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-emerald-900 ring-1 ring-emerald-300">
-                    {descreverSlot(r.slotId)} · {SLOT_POR_ID[r.slotId]?.rotulo}
-                    {r.pendente && <span className="ml-1 text-amber-700">(aguardando envio)</span>}
-                  </li>
-                ))}
-            </ul>
-            <p className="mt-2 text-xs text-emerald-800">Para cancelar um horário confirmado, entre em contato com a coordenação.</p>
+            {verSemana ? (
+              <GradeDesktop estadoDe={estadoDe} ocupacao={ocupacao} aoAlternar={aoAlternar} />
+            ) : (
+              <>
+                <div className="sticky top-0 z-20 -mx-4 space-y-2 bg-fundo/95 px-4 py-2 backdrop-blur md:static md:mx-0 md:rounded-2xl md:bg-white md:p-3 md:shadow-sm md:ring-1 md:ring-slate-200">
+                  <SeletorDias diaAtivo={diaAtivo} aoTrocar={setDiaAtivo} selecao={selecao} ocupacao={ocupacao} />
+                  <BarraFiltros filtros={filtros} aoMudar={setFiltros} />
+                </div>
+                <GradeDia
+                  diaAtivo={diaAtivo}
+                  filtros={filtros}
+                  estadoDe={estadoDe}
+                  ocupacao={ocupacao}
+                  selecao={selecao}
+                  confirmados={confirmados}
+                  aoAlternar={aoAlternar}
+                  aoLimparFiltros={() => setFiltros(FILTROS_VAZIOS)}
+                />
+              </>
+            )}
           </section>
+
+          {!desktop && minhas.length > 0 && (
+            <section className="rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
+              <h2 className="mb-2 text-sm font-bold text-emerald-900">Seus horários confirmados ({minhas.length})</h2>
+              <ul className="flex flex-wrap gap-2">
+                {[...minhas]
+                  .sort((a, b) => a.slotId.localeCompare(b.slotId))
+                  .map((r) => (
+                    <li key={r.id} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-emerald-900 ring-1 ring-emerald-300">
+                      {descreverSlot(r.slotId)} · {SLOT_POR_ID[r.slotId]?.rotulo}
+                      {r.pendente && <span className="ml-1 text-amber-700">(aguardando envio)</span>}
+                    </li>
+                  ))}
+              </ul>
+              <p className="mt-2 text-xs text-emerald-800">Para cancelar um horário confirmado, entre em contato com a coordenação.</p>
+            </section>
+          )}
+        </main>
+
+        {desktop && (
+          <ResumoSelecao
+            selecao={selecao}
+            confirmadas={minhas}
+            aoRemover={removerDaSelecao}
+            aoLimpar={limparSelecao}
+            aoConfirmar={pedirConfirmacao}
+            enviando={enviando}
+          />
         )}
-      </main>
+      </div>
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-slate-500 sm:flex-row">
@@ -176,13 +237,15 @@ export default function App() {
         </div>
       </footer>
 
-      <BarraSelecao
-        selecao={selecao}
-        aoRemover={(id) => setSelecao((s) => s.filter((x) => x !== id))}
-        aoLimpar={() => setSelecao([])}
-        aoConfirmar={pedirConfirmacao}
-        enviando={enviando}
-      />
+      {!desktop && (
+        <BarraSelecao
+          selecao={selecao}
+          aoRemover={removerDaSelecao}
+          aoLimpar={limparSelecao}
+          aoConfirmar={pedirConfirmacao}
+          enviando={enviando}
+        />
+      )}
 
       <Modal aberto={revisando} aoFechar={() => !enviando && setRevisando(false)} titulo="Confirmar seleção">
         <p className="text-sm text-slate-700">
